@@ -1,0 +1,42 @@
+# فایل‌های حساس
+domains.list
+ssl/*.key
+ssl/*.csr
+ssl/*.cnf
+
+# لاگ‌ها
+logs/*
+
+# فولدرهای داده داکر
+data/
+
+# فایل‌های موقت
+*.tmp
+*.temp
+
+# کانف‌های اتوماتیک generated
+conf/auto_*.conf
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Docker related
+.env
+docker-compose.override.yml
+
+# SSL certificates (except public certs)
+ssl/*.key
+ssl/*.csr
+ssl/*.cnf
+!ssl/*.crt
+
+# Temporary config files
+conf/*.tmp
+conf/*.temp

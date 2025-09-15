@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./conf:/etc/nginx/conf.d
+      - ./ssl:/etc/nginx/ssl
+      - ./logs:/var/log/nginx
+      - ./html:/usr/share/nginx/html
+    networks:
+      - nginx-network
+    restart: unless-stopped
+
+networks:
+  nginx-network:
+    driver: bridge
