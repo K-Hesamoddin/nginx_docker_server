@@ -10,7 +10,8 @@ services:
     volumes:
       - ./conf:/etc/nginx/conf.d
       - ./ssl:/etc/nginx/ssl
-      - ./logs:/var/log/nginx
+      #- ./logs:/var/log/nginx
+      - ./logs:/etc/nginx/logs  # تغییر مسیر volume mapping
       - ./html:/usr/share/nginx/html
     networks:
       - nginx-network
@@ -19,3 +20,4 @@ services:
 networks:
   nginx-network:
     driver: bridge
+

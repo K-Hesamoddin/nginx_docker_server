@@ -4,19 +4,16 @@
 DOMAINS_FILE=${DOMAINS_FILE:-"domains.list"}
 SSL_DIR=${SSL_DIR:-"ssl"}
 
-# اطلاعات شرکت
+# اطلاعات شرکت برای fallback
 COMPANY_NAME=${COMPANY_NAME:-"My Company"}
 COMPANY_EMAIL=${COMPANY_EMAIL:-"admin@mycompany.com"}
 COUNTRY_CODE=${COUNTRY_CODE:-"IR"}
 STATE_NAME=${STATE_NAME:-"Tehran"}
 CITY_NAME=${CITY_NAME:-"Tehran"}
 ORGANIZATION_NAME=${ORGANIZATION_NAME:-"My Organization"}
-ORGANIZATIONAL_UNIT=${ORGANIZATIONAL_UNIT:-"IT Department"}
 
 echo "Using domains file: $DOMAINS_FILE"
 echo "Using SSL directory: $SSL_DIR"
-echo "Company: $COMPANY_NAME"
-echo "Email: $COMPANY_EMAIL"
 
 if [ ! -f "$DOMAINS_FILE" ]; then
     echo "ERROR: domains.list not found at: $DOMAINS_FILE"
@@ -25,7 +22,7 @@ fi
 
 mkdir -p "$SSL_DIR"
 
-echo "Generating SSL certificates with company information..."
+echo "Generating SSL certificates..."
 
 grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
     if [ -z "$line" ]; then
@@ -42,76 +39,47 @@ grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
     
     echo "Processing domain: $domain"
     
+    # بررسی وجود سرتیفیکیت معتبر
     if [ -f "$SSL_DIR/$domain.crt" ] && [ -f "$SSL_DIR/$domain.key" ] && [ -s "$SSL_DIR/$domain.crt" ]; then
-        echo "✓ Certificate for $domain already exists and is valid"
+        # بررسی اینکه آیا سرتیفیکیت Let's Encrypt است یا خودامضا
+        issuer=$(openssl x509 -in "$SSL_DIR/$domain.crt" -noout -issuer 2>/dev/null | cut -d= -f2-)
+        if echo "$issuer" | grep -q "Let's Encrypt"; then
+            echo "✅ Let's Encrypt certificate for $domain already exists"
+        else
+            echo "⚠ Self-signed certificate for $domain exists, trying to upgrade to Let's Encrypt"
+        fi
         continue
     fi
     
     echo "Generating SSL certificate for: $domain"
     
-    # ایجاد فایل config با اطلاعات کامل
-    cat > "$SSL_DIR/$domain.cnf" << EOF
-[req]
-distinguished_name = req_distinguished_name
-x509_extensions = v3_req
-prompt = no
-default_bits = 2048
-default_keyfile = $domain.key
-encrypt_key = no
-default_md = sha256
-
-[req_distinguished_name]
-C = $COUNTRY_CODE
-ST = $STATE_NAME
-L = $CITY_NAME
-O = $ORGANIZATION_NAME
-OU = $ORGANIZATIONAL_UNIT
-CN = $domain
-emailAddress = $COMPANY_EMAIL
-
-[v3_req]
-basicConstraints = CA:FALSE
-keyUsage = digitalSignature, keyEncipherment, dataEncipherment
-extendedKeyUsage = serverAuth, clientAuth
-subjectAltName = @alt_names
-subjectKeyIdentifier = hash
-authorityKeyIdentifier = keyid,issuer
-
-[alt_names]
-DNS.1 = $domain
-DNS.2 = www.$domain
-IP.1 = $ip
-EOF
-    
-    # تولید کلید خصوصی
-    echo "Generating private key..."
-    openssl genrsa -out "$SSL_DIR/$domain.key" 2048
-    
-    # ایجاد Certificate Signing Request
-    echo "Creating CSR..."
-    openssl req -new -key "$SSL_DIR/$domain.key" -out "$SSL_DIR/$domain.csr" \
-        -config "$SSL_DIR/$domain.cnf"
-    
-    # تولید سرتیفیکیت
-    echo "Generating certificate..."
-    openssl x509 -req -days 365 -in "$SSL_DIR/$domain.csr" \
-        -signkey "$SSL_DIR/$domain.key" -out "$SSL_DIR/$domain.crt" \
-        -extensions v3_req -extfile "$SSL_DIR/$domain.cnf"
-    
-    # تمیز کردن فایل‌های موقت
-    rm -f "$SSL_DIR/$domain.csr" "$SSL_DIR/$domain.cnf"
-    
-    if [ -s "$SSL_DIR/$domain.crt" ]; then
-        echo "✓ Certificate for $domain generated successfully!"
-        echo "✓ Subject: $(openssl x509 -in "$SSL_DIR/$domain.crt" -noout -subject 2>/dev/null)"
+    # اولویت: استفاده از Let's Encrypt
+    echo "Trying Let's Encrypt first..."
+    if sudo certbot certonly --standalone --non-interactive --agree-tos \
+        --email "$COMPANY_EMAIL" -d "$domain" -d "www.$domain" 2>/dev/null; then
+        
+        # کپی سرتیفیکیت‌های Let's Encrypt
+        sudo cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$SSL_DIR/$domain.crt"
+        sudo cp "/etc/letsencrypt/live/$domain/privkey.pem" "$SSL_DIR/$domain.key"
+        sudo chown $USER:$USER "$SSL_DIR/$domain.crt" "$SSL_DIR/$domain.key"
+        
+        echo "✅ Let's Encrypt certificate for $domain generated successfully!"
+        echo "   This is a VALID certificate trusted by all browsers"
+        
     else
-        echo "✗ Failed to generate certificate for $domain"
-        # ایجاد فایل‌های dummy برای تست
-        echo "Creating self-signed certificate for testing..."
-        openssl req -x509 -newkey rsa:2048 -keyout "$SSL_DIR/$domain.key" \
-            -out "$SSL_DIR/$domain.crt" -days 365 -nodes \
-            -subj "/C=$COUNTRY_CODE/ST=$STATE_NAME/L=$CITY_NAME/O=$ORGANIZATION_NAME/OU=$ORGANIZATIONAL_UNIT/CN=$domain/emailAddress=$COMPANY_EMAIL"
+        echo "⚠ Let's Encrypt failed, creating self-signed certificate with company info"
+        
+        # Fallback: سرتیفیکیت خودامضا با اطلاعات شرکت
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "$SSL_DIR/$domain.key" \
+            -out "$SSL_DIR/$domain.crt" \
+            -subj "/C=$COUNTRY_CODE/ST=$STATE_NAME/L=$CITY_NAME/O=$ORGANIZATION_NAME/CN=$domain/emailAddress=$COMPANY_EMAIL" \
+            -addext "subjectAltName = DNS:$domain, DNS:www.$domain" 2>/dev/null
+        
+        echo "⚠ Self-signed certificate created as fallback"
+        echo "   Browser will show warning for this certificate"
     fi
+    
 done
 
 echo "SSL certificate generation completed."
