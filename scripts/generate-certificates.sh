@@ -39,24 +39,13 @@ grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
     
     echo "Processing domain: $domain"
     
-    # بررسی وجود سرتیفیکیت معتبر
-    if [ -f "$SSL_DIR/$domain.crt" ] && [ -f "$SSL_DIR/$domain.key" ] && [ -s "$SSL_DIR/$domain.crt" ]; then
-        # بررسی اینکه آیا سرتیفیکیت Let's Encrypt است یا خودامضا
-        issuer=$(openssl x509 -in "$SSL_DIR/$domain.crt" -noout -issuer 2>/dev/null | cut -d= -f2-)
-        if echo "$issuer" | grep -q "Let's Encrypt"; then
-            echo "✅ Let's Encrypt certificate for $domain already exists"
-        else
-            echo "⚠ Self-signed certificate for $domain exists, trying to upgrade to Let's Encrypt"
-        fi
-        continue
-    fi
-    
+    # همیشه سعی کن سرتیفیکیت بسازی، حتی اگر از قبل وجود دارد
     echo "Generating SSL certificate for: $domain"
     
     # اولویت: استفاده از Let's Encrypt
     echo "Trying Let's Encrypt first..."
     if sudo certbot certonly --standalone --non-interactive --agree-tos \
-        --email "$COMPANY_EMAIL" -d "$domain" -d "www.$domain" 2>/dev/null; then
+        --email "$COMPANY_EMAIL" -d "$domain" 2>/dev/null; then
         
         # کپی سرتیفیکیت‌های Let's Encrypt
         sudo cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$SSL_DIR/$domain.crt"
@@ -64,20 +53,18 @@ grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
         sudo chown $USER:$USER "$SSL_DIR/$domain.crt" "$SSL_DIR/$domain.key"
         
         echo "✅ Let's Encrypt certificate for $domain generated successfully!"
-        echo "   This is a VALID certificate trusted by all browsers"
         
     else
-        echo "⚠ Let's Encrypt failed, creating self-signed certificate with company info"
+        echo "⚠ Let's Encrypt failed, creating self-signed certificate"
         
-        # Fallback: سرتیفیکیت خودامضا با اطلاعات شرکت
+        # Fallback: سرتیفیکیت خودامضا
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
             -keyout "$SSL_DIR/$domain.key" \
             -out "$SSL_DIR/$domain.crt" \
             -subj "/C=$COUNTRY_CODE/ST=$STATE_NAME/L=$CITY_NAME/O=$ORGANIZATION_NAME/CN=$domain/emailAddress=$COMPANY_EMAIL" \
-            -addext "subjectAltName = DNS:$domain, DNS:www.$domain" 2>/dev/null
+            -addext "subjectAltName = DNS:$domain" 2>/dev/null
         
         echo "⚠ Self-signed certificate created as fallback"
-        echo "   Browser will show warning for this certificate"
     fi
     
 done
