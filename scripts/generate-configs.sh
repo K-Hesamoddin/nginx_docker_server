@@ -19,22 +19,16 @@ mkdir -p "$LOG_DIR"
 echo "Generating Nginx configurations..."
 
 grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
-    if [ -z "$line" ]; then
-        continue
-    fi
-    
-    domain=$(echo $line | awk '{print $1}')
-    ip=$(echo $line | awk '{print $2}')
-    port=$(echo $line | awk '{print $3}')
-    
-    if [ -z "$domain" ]; then
-        continue
-    fi
-    
+    [ -z "$line" ] && continue
+
+    # اولین ستون = دامنه
+    domain=$(echo "$line" | awk '{print $1}')
+    # بقیه ستون‌ها = location و مقصدها
+    rest=$(echo "$line" | cut -d' ' -f2-)
+
     config_file="$CONF_DIR/auto_${domain}.conf"
-    
     echo "Creating config for: $domain"
-    
+
     cat > "$config_file" << EOF
 # Auto-generated config for $domain
 server {
@@ -46,8 +40,9 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name $domain;
 
     ssl_certificate     /etc/nginx/ssl/$domain.crt;
@@ -59,8 +54,21 @@ server {
 
     access_log $LOG_DIR/${domain}.access.log;
     error_log $LOG_DIR/${domain}.error.log;
+EOF
 
-    location / {
+    # پردازش location ها
+    set -- $rest
+    while [ $# -gt 0 ]; do
+        location=$1
+        target=$2
+        shift 2
+
+        ip=$(echo "$target" | cut -d: -f1)
+        port=$(echo "$target" | cut -d: -f2)
+
+        cat >> "$config_file" << EOF
+
+    location $location {
         proxy_pass http://$ip:$port;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -74,9 +82,10 @@ server {
         proxy_set_header X-Forwarded-Host \$host;
         proxy_set_header X-Forwarded-Server \$host;
     }
-}
 EOF
-    
+    done
+
+    echo "}" >> "$config_file"
     echo "✓ Config for $domain created: $config_file"
 done
 

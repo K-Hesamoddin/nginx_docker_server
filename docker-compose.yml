@@ -5,13 +5,25 @@ services:
     image: nginx:alpine
     container_name: nginx-proxy
     ports:
+      # HTTP/HTTPS
       - "80:80"
       - "443:443"
+      # Mail ports (SMTP / POP3 / IMAP)
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "110:110"
+      - "143:143"
+      - "993:993"
+      - "995:995"
     volumes:
+      # کانفیگ HTTP و Stream
       - ./conf:/etc/nginx/conf.d
+      # SSL Certificates
       - ./ssl:/etc/nginx/ssl
-      #- ./logs:/var/log/nginx
-      - ./logs:/etc/nginx/logs  # تغییر مسیر volume mapping
+      # لاگ‌ها
+      - ./logs:/etc/nginx/logs
+      # فایل‌های HTML
       - ./html:/usr/share/nginx/html
     networks:
       - nginx-network
@@ -20,4 +32,3 @@ services:
 networks:
   nginx-network:
     driver: bridge
-
