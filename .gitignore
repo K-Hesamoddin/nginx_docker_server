@@ -16,6 +16,7 @@ data/
 
 # کانف‌های اتوماتیک generated
 conf/auto_*.conf
+conf/auto/
 
 # IDE files
 .vscode/

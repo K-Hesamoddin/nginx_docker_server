@@ -2,10 +2,11 @@
 
 DOMAINS_FILE=${DOMAINS_FILE:-"domains.list"}
 CONF_DIR=${CONF_DIR:-"conf"}
+AUTO_DIR="$CONF_DIR/auto"
 LOG_DIR=${LOG_DIR:-"logs/nginx"}
 
 echo "Using domains file: $DOMAINS_FILE"
-echo "Using config directory: $CONF_DIR"
+echo "Using auto config directory: $AUTO_DIR"
 echo "Using log directory: $LOG_DIR"
 
 if [ ! -f "$DOMAINS_FILE" ]; then
@@ -13,7 +14,7 @@ if [ ! -f "$DOMAINS_FILE" ]; then
     exit 1
 fi
 
-mkdir -p "$CONF_DIR"
+mkdir -p "$AUTO_DIR"
 mkdir -p "$LOG_DIR"
 
 echo "Generating Nginx configurations..."
@@ -21,12 +22,10 @@ echo "Generating Nginx configurations..."
 grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
     [ -z "$line" ] && continue
 
-    # اولین ستون = دامنه
     domain=$(echo "$line" | awk '{print $1}')
-    # بقیه ستون‌ها = location و مقصدها
     rest=$(echo "$line" | cut -d' ' -f2-)
 
-    config_file="$CONF_DIR/auto_${domain}.conf"
+    config_file="$AUTO_DIR/${domain}.conf"
     echo "Creating config for: $domain"
 
     cat > "$config_file" << EOF
