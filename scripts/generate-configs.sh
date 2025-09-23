@@ -30,6 +30,8 @@ grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
 
     cat > "$config_file" << EOF
 # Auto-generated config for $domain
+
+# Redirect HTTP -> HTTPS
 server {
     listen 80;
     listen [::]:80;
@@ -47,15 +49,14 @@ server {
     ssl_certificate     /etc/nginx/ssl/$domain.crt;
     ssl_certificate_key /etc/nginx/ssl/$domain.key;
 
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    ssl_prefer_server_ciphers on;
+    # Include security configurations once
+    include /etc/nginx/conf.d/includes/security.conf;
 
     access_log $LOG_DIR/${domain}.access.log;
     error_log $LOG_DIR/${domain}.error.log;
 EOF
 
-    # پردازش location ها
+    # پردازش location ها (proxy_pass)
     set -- $rest
     while [ $# -gt 0 ]; do
         location=$1
@@ -68,7 +69,7 @@ EOF
         cat >> "$config_file" << EOF
 
     location $location {
-        proxy_pass http://$ip:$port;
+        proxy_pass http://$ip:$port/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -84,6 +85,7 @@ EOF
 EOF
     done
 
+    # حالا بعد از اضافه کردن همه location ها، بلاک server رو ببند
     echo "}" >> "$config_file"
     echo "✓ Config for $domain created: $config_file"
 done
