@@ -25,48 +25,50 @@ mkdir -p "$SSL_DIR"
 echo "Generating SSL certificates..."
 
 grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
-    if [ -z "$line" ]; then
+    line=${line%%#*}  # حذف کامنت داخلی خط
+    line=$(echo "$line" | xargs)
+    [ -z "$line" ] && continue
+
+    flag=$(echo "$line" | awk '{print $1}')
+    domain=$(echo "$line" | awk '{print $2}')
+    ip=$(echo "$line" | awk '{print $3}')
+    port=$(echo "$line" | awk '{print $4}')
+
+    [ -z "$domain" ] && continue
+
+    crt_file="$SSL_DIR/$domain.crt"
+    key_file="$SSL_DIR/$domain.key"
+
+    # اگر پرچم 0 باشد و فایل‌ها موجود باشند، از ایجاد صرف‌نظر کن
+    if [ "$flag" -eq 0 ] && [ -f "$crt_file" ] && [ -f "$key_file" ]; then
+        echo "Skipping $domain (flag=0 and SSL already exists)"
         continue
     fi
-    
-    domain=$(echo $line | awk '{print $1}')
-    ip=$(echo $line | awk '{print $2}')
-    port=$(echo $line | awk '{print $3}')
-    
-    if [ -z "$domain" ]; then
-        continue
-    fi
-    
+
     echo "Processing domain: $domain"
-    
-    # همیشه سعی کن سرتیفیکیت بسازی، حتی اگر از قبل وجود دارد
-    echo "Generating SSL certificate for: $domain"
-    
+
     # اولویت: استفاده از Let's Encrypt
-    echo "Trying Let's Encrypt first..."
+    echo "Trying Let's Encrypt..."
     if sudo certbot certonly --standalone --non-interactive --agree-tos \
         --email "$COMPANY_EMAIL" -d "$domain" 2>/dev/null; then
-        
-        # کپی سرتیفیکیت‌های Let's Encrypt
-        sudo cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$SSL_DIR/$domain.crt"
-        sudo cp "/etc/letsencrypt/live/$domain/privkey.pem" "$SSL_DIR/$domain.key"
-        sudo chown $USER:$USER "$SSL_DIR/$domain.crt" "$SSL_DIR/$domain.key"
-        
+
+        sudo cp "/etc/letsencrypt/live/$domain/fullchain.pem" "$crt_file"
+        sudo cp "/etc/letsencrypt/live/$domain/privkey.pem" "$key_file"
+        sudo chown $USER:$USER "$crt_file" "$key_file"
         echo "✅ Let's Encrypt certificate for $domain generated successfully!"
-        
+
     else
         echo "⚠ Let's Encrypt failed, creating self-signed certificate"
-        
-        # Fallback: سرتیفیکیت خودامضا
+
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout "$SSL_DIR/$domain.key" \
-            -out "$SSL_DIR/$domain.crt" \
+            -keyout "$key_file" \
+            -out "$crt_file" \
             -subj "/C=$COUNTRY_CODE/ST=$STATE_NAME/L=$CITY_NAME/O=$ORGANIZATION_NAME/CN=$domain/emailAddress=$COMPANY_EMAIL" \
             -addext "subjectAltName = DNS:$domain" 2>/dev/null
-        
+
         echo "⚠ Self-signed certificate created as fallback"
     fi
-    
+
 done
 
 echo "SSL certificate generation completed."
