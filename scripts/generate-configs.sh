@@ -22,11 +22,19 @@ echo "Generating Nginx configurations..."
 grep -v "^#" "$DOMAINS_FILE" | while IFS= read -r line; do
     [ -z "$line" ] && continue
 
-    domain=$(echo "$line" | awk '{print $1}')
-    rest=$(echo "$line" | cut -d' ' -f2-)
+    # خواندن پرچم، دامنه و بقیه
+    update_flag=$(echo "$line" | awk '{print $1}')
+    domain=$(echo "$line" | awk '{print $2}')
+    rest=$(echo "$line" | cut -d' ' -f3-)
 
     config_file="$AUTO_DIR/${domain}.conf"
-    echo "Creating config for: $domain"
+
+    if [ "$update_flag" -eq 0 ] && [ -f "$config_file" ]; then
+        echo "Skipping $domain (update_flag=0 and file exists)"
+        continue
+    fi
+
+    echo "Creating/updating config for: $domain"
 
     cat > "$config_file" << EOF
 # Auto-generated config for $domain
@@ -49,7 +57,6 @@ server {
     ssl_certificate     /etc/nginx/ssl/$domain.crt;
     ssl_certificate_key /etc/nginx/ssl/$domain.key;
 
-    # Include security configurations once
     include /etc/nginx/conf.d/includes/security.conf;
 
     access_log $LOG_DIR/${domain}.access.log;
@@ -85,9 +92,8 @@ EOF
 EOF
     done
 
-    # حالا بعد از اضافه کردن همه location ها، بلاک server رو ببند
     echo "}" >> "$config_file"
-    echo "✓ Config for $domain created: $config_file"
+    echo "✓ Config for $domain created/updated: $config_file"
 done
 
 echo "Nginx configuration generation completed."
