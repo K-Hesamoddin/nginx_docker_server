@@ -52,7 +52,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name $domain;
+    server_name $domain www.$domain;
 
     ssl_certificate     /etc/nginx/ssl/$domain.crt;
     ssl_certificate_key /etc/nginx/ssl/$domain.key;
