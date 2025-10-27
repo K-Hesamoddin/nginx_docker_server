@@ -56,6 +56,8 @@ server {
 
     ssl_certificate     /etc/nginx/ssl/$domain.crt;
     ssl_certificate_key /etc/nginx/ssl/$domain.key;
+    
+    client_max_body_size 50M; 
 
     include /etc/nginx/conf.d/includes/security.conf;
 
