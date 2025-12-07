@@ -60,6 +60,7 @@ server {
     client_max_body_size 50M; 
 
     include /etc/nginx/conf.d/includes/security.conf;
+    include /etc/nginx/conf.d/buffer.conf;
 
     access_log off; #$LOG_DIR/${domain}.access.log;
     error_log $LOG_DIR/${domain}.error.log warn;
