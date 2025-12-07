@@ -61,8 +61,8 @@ server {
 
     include /etc/nginx/conf.d/includes/security.conf;
 
-    access_log $LOG_DIR/${domain}.access.log;
-    error_log $LOG_DIR/${domain}.error.log;
+    access_log off; #$LOG_DIR/${domain}.access.log;
+    error_log $LOG_DIR/${domain}.error.log warn;
 EOF
 
     # پردازش location ها (proxy_pass)
