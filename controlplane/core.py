@@ -82,6 +82,12 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
             stub TEXT NOT NULL UNIQUE,
             CHECK(kind IN ('dedicated','wildcard'))
         );
+        CREATE TABLE IF NOT EXISTS legacy_flags (
+            domain TEXT PRIMARY KEY REFERENCES domains(name) ON DELETE CASCADE,
+            flag_count INTEGER NOT NULL CHECK(flag_count IN (1,2)),
+            first_flag TEXT NOT NULL CHECK(first_flag IN ('0','1')),
+            second_flag TEXT CHECK(second_flag IS NULL OR second_flag IN ('0','1'))
+        );
         CREATE TABLE IF NOT EXISTS audit (
             id INTEGER PRIMARY KEY, occurred_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             action TEXT NOT NULL, detail TEXT NOT NULL
@@ -138,43 +144,112 @@ def save_certificate(conn: sqlite3.Connection, zone: str, kind: str, stub: str) 
 
 
 def import_domains_list(conn: sqlite3.Connection, filename: str | Path) -> dict:
-    """Idempotent importer. Preserve legacy flag semantics: 0=do not regenerate."""
+    """Import both historical formats, without interpreting the regeneration flags.
+
+    Accepted input:
+      1 example.com / 192.0.2.10:3000             (one flag)
+      1 0 example.com / 192.0.2.10:3000           (two flags)
+
+    A flag of 0 does NOT mean a host is disabled. Its historical meaning is
+    generator-specific; V2 preserves flags as opaque values in legacy_flags.
+    The full file is validated before *any* DB mutation. Existing records
+    are never overwritten. Intended only as initial inventory migration.
+    """
     result = {"imported": 0, "skipped": 0, "errors": []}
-    for lineno, raw in enumerate(Path(filename).read_text().splitlines(), 1):
+    pending = []
+    seen = set()
+    try:
+        source_lines = Path(filename).read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        result["errors"].append(str(exc))
+        return result
+
+    for lineno, raw in enumerate(source_lines, 1):
         line = raw.split("#", 1)[0].strip()
         if not line:
             continue
         try:
             tokens = shlex.split(line)
-            if len(tokens) < 2 or tokens[0] not in ("0", "1"):
-                raise ValueError("expected: flag domain [path upstream]...")
-            domain = hostname(tokens[1])
-            rest = tokens[2:]
+            if len(tokens) < 4 or tokens[0] not in ("0", "1"):
+                raise ValueError("expected flag [flag] domain path host:port")
+            two_flags = tokens[1] in ("0", "1")
+            domain_index = 2 if two_flags else 1
+            if len(tokens) < domain_index + 3:
+                raise ValueError("missing domain or backend route")
+            domain = hostname(tokens[domain_index])
+            rest = tokens[domain_index + 1:]
             if len(rest) % 2:
-                raise ValueError("route/upstream pairs are incomplete")
-            # Import is non-destructive: never overwrite edits already in the DB.
-            if conn.execute("SELECT 1 FROM domains WHERE name=?", (domain,)).fetchone():
-                result["skipped"] += 1
-                continue
-            # Validate each route before making any changes for this line.
-            for path, target in zip(rest[::2], rest[1::2]):
+                raise ValueError("route/target pairs are incomplete")
+            if domain in seen:
+                raise ValueError(f"duplicate domain {domain!r} in input")
+            routes = list(zip(rest[::2], rest[1::2]))
+            locations = set()
+            for path, target in routes:
                 route_path(path)
                 upstream(target)
-            save_domain(conn, domain, redirect_www=(domain.count(".") == 1))
-            for path, target in zip(rest[::2], rest[1::2]):
-                save_route(conn, domain, path, target)
-            result["imported"] += 1
-        except (ValueError, sqlite3.Error) as exc:
+                if path in locations:
+                    raise ValueError(f"duplicate location {path!r} for {domain}")
+                locations.add(path)
+            pending.append((domain, tokens[:domain_index], routes))
+            seen.add(domain)
+        except ValueError as exc:
             result["errors"].append(f"line {lineno}: {exc}")
+
+    if result["errors"]:
+        # Especially important for pasted/truncated inventory: no partial import.
+        return result
+
+    with conn:
+        existing = {row["name"] for row in conn.execute("SELECT name FROM domains")}
+        for domain, flags, routes in pending:
+            if domain in existing:
+                result["skipped"] += 1
+                continue
+            # An explicitly managed www host must not be claimed as an implicit
+            # redirect alias of its apex domain.
+            redirect_www = (
+                domain.count(".") == 1
+                and f"www.{domain}" not in seen
+                and f"www.{domain}" not in existing
+            )
+            conn.execute(
+                "INSERT INTO domains(name,redirect_www) VALUES (?,?)",
+                (domain, int(redirect_www))
+            )
+            for path, target in routes:
+                conn.execute(
+                    "INSERT INTO routes(domain,path,target) VALUES(?,?,?)",
+                    (domain, path, upstream(target))
+                )
+            conn.execute(
+                """INSERT INTO legacy_flags(domain,flag_count,first_flag,second_flag)
+                   VALUES(?,?,?,?)""",
+                (domain, len(flags), flags[0], flags[1] if len(flags) == 2 else None)
+            )
+            audit(conn, "legacy-import", f"{domain} ({len(flags)} flags, {len(routes)} routes)")
+            result["imported"] += 1
     return result
 
 
 def export_domains_list(conn: sqlite3.Connection) -> str:
-    """Backwards-compatible snapshot. DB is authoritative after migration."""
-    lines = ["# Generated by controlplane; do not edit this export."]
+    """Round-trip inventory flags and route order, not a deploy command.
+
+    New DB-only domains use conservative 0 0 compatibility placeholders.
+    Never hand this to legacy v1 shell scripts without reviewing their parser:
+    repository v1 parses only one flag, while deployed input uses two.
+    """
+    lines = ["# V2 inventory export. Validate against original before using with legacy scripts."]
     for d in conn.execute("SELECT * FROM domains ORDER BY name"):
-        parts = ["1", d["name"]]
-        for r in conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY LENGTH(path) DESC, path",
+        flags = conn.execute("SELECT * FROM legacy_flags WHERE domain=?",
+                             (d["name"],)).fetchone()
+        if flags is None:
+            parts = ["0", "0", d["name"]]
+        else:
+            parts = [flags["first_flag"]]
+            if flags["flag_count"] == 2:
+                parts.append(flags["second_flag"])
+            parts.append(d["name"])
+        for r in conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY id",
                               (d["name"],)):
             parts += [r["path"], r["target"]]
         lines.append(" ".join(parts))
@@ -250,7 +325,13 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) ->
     d = conn.execute("SELECT * FROM domains WHERE name=? AND enabled=1", (domain,)).fetchone()
     if d is None:
         raise ValueError(f"Domain not enabled: {domain}")
-    names = [domain] + ([f"www.{domain}"] if d["redirect_www"] else [])
+    # Explicit www sites own their hostname; prevent duplicate server_name
+    # claims and unnecessary redirects when migrating legacy inventory.
+    explicit_www = conn.execute(
+        "SELECT 1 FROM domains WHERE name=? AND enabled=1",
+        (f"www.{domain}",)
+    ).fetchone() is not None
+    names = [domain] + ([f"www.{domain}"] if d["redirect_www"] and not explicit_www else [])
     certs = {name: resolve_certificate(conn, ssl_dir, name) for name in names}
     lines = [f"# Managed by nginx-control-plane-v2: {domain}",
              "server {", "    listen 80;", f"    server_name {' '.join(names)};",
