@@ -1,7 +1,8 @@
 """Certificate renewal bridge: acme.sh DNS-01 -> validated immutable inventory.
 
-No direct Nginx access by default. Automatic deployment is possible only after
-a separate operator enablement file AND the all-V2-managed apply guard.
+This module never calls Docker, alters Nginx configs, or reloads servers.
+Certificate renewal only registers a verified immutable certificate candidate.
+Publication requires a separately approved per-domain revision.
 """
 from __future__ import annotations
 
@@ -50,8 +51,8 @@ def configure_renewal_hook(root: Path, db_file: Path, ssl_dir: Path,
                            zone: str, acme_bin: str) -> str:
     """Have acme.sh persist stable install targets and a renewal hook.
 
-    acme.sh invokes the reload command during installation and after future
-    successful renewals. A root-owned opt-in marker gates live deployment.
+    acme.sh invokes the hook during installation and future renewals. The
+    hook only updates registered inventory; publishing remains manual.
     """
     zone = hostname(zone)
     if not shutil.which(acme_bin):
@@ -97,7 +98,7 @@ def sync_renewed(conn: sqlite3.Connection, root: Path, ssl_dir: Path,
     """Validate ACME staging pair, register immutable cert and optionally deploy.
 
     This is the command invoked by acme.sh's stored --reloadcmd.
-    The default marker is absent; therefore Nginx is not changed.
+    Nginx is never changed: automatic promotion is intentionally disabled.
     """
     zone = hostname(zone)
     root = root.resolve()
@@ -131,11 +132,8 @@ def sync_renewed(conn: sqlite3.Connection, root: Path, ssl_dir: Path,
         _write_exclusive(cert_dest, cert_bytes, 0o644)
         inspect_certificate(ssl_dir, stub, min_days=14)
         save_certificate(conn, zone, "wildcard", stub)
-        marker = root / "data" / "enable-auto-deploy"
-        if auto_apply and marker.is_file() and not marker.is_symlink():
-            if marker.read_text().strip() != "ALLOW_V2_MANAGED_DEPLOY":
-                raise ValueError("Invalid auto-deploy activation marker")
-            # Blocks replacing any legacy-managed config; also validates all domains.
-            from .cli import apply_config
-            apply_config(conn, root, ssl_dir, allow_replace_v1=False)
+        # Automatic configuration regeneration is explicitly forbidden:
+        # users maintain manual V1 configs and choose a reviewed V2 revision
+        # using the admin panel. Cert renewal updates inventory only; it cannot
+        # rewrite any virtual host or reload the running Nginx container.
         return stub
