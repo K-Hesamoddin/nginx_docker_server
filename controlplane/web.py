@@ -114,6 +114,7 @@ def create_app():
     app = Flask(__name__)
     app.secret_key = secret
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
+                      SESSION_COOKIE_SECURE=os.environ.get("PANEL_HTTPS_ONLY") == "1",
                       MAX_CONTENT_LENGTH=256 * 1024)
     db_file = Path(os.environ.get("CONTROLPLANE_DB", "data/controlplane.sqlite3"))
     ssl_dir = Path(os.environ.get("SSL_DIR", "ssl"))
@@ -137,6 +138,9 @@ def create_app():
             if not is_allowed_peer(conn, request.remote_addr or ""):
                 abort(403)
             user = get_session_user(conn, session)
+        if app.config["SESSION_COOKIE_SECURE"] and not request.is_secure:
+            # Credentials never traverse HTTP in the LAN-enabled mode.
+            abort(403)
         if request.path == "/" and request.method == "GET":
             # A revoked user must not see the legacy inventory even if an
             # earlier signed session still carries auth=True.
@@ -149,6 +153,10 @@ def create_app():
             return
         if user is None:
             session.clear()
+            # A changed or stale session is normal after upgrading from the
+            # old single-password panel. Browser navigation must reach login.
+            if request.method in ("GET", "HEAD"):
+                return redirect(url_for("index"))
             abort(401)
         session["role"] = user["role"]
         if request.method == "POST":
@@ -168,8 +176,10 @@ def create_app():
         ) and user["role"] != "admin":
             abort(403)
 
-    @app.route("/login", methods=["POST"])
+    @app.route("/login", methods=["GET", "POST"])
     def login():
+        if request.method == "GET":
+            return redirect(url_for("index"))
         with open_db(db_file) as conn:
             user = authenticate(conn, request.form.get("username", "admin"),
                                 request.form.get("password", ""))
