@@ -166,3 +166,50 @@ def test_stream_staged_and_does_not_publish_listener(db, login):
     assert "STAGING ONLY" in stream_preview(db, "redis-test")
     row = db.execute("SELECT * FROM stream_services WHERE name='redis-test'").fetchone()
     assert row["enabled"] == 0
+
+
+def test_custom_include_revisions_are_immutable_and_never_live(db, login):
+    from controlplane.admin_features import (
+        save_include_revision, include_history, include_version_diff, delete_stream
+    )
+    client, csrf = login
+    register_include(db, "extra-policy.conf", "staged safety policy")
+    first = save_include_revision(db, "extra-policy.conf",
+                                  "add_header X-Policy one always;\n", "first")
+    second = save_include_revision(db, "extra-policy.conf",
+                                   "add_header X-Policy two always;\n", "second")
+    versions = include_history(db, "extra-policy.conf")
+    assert [v["id"] for v in versions] == [second, first]
+    row, diff = include_version_diff(db, "extra-policy.conf", second)
+    assert "X-Policy two" in row["body"]
+    assert "+add_header X-Policy two" in diff
+    assert "-add_header X-Policy one" in diff
+    assert client.get("/admin/includes?include=extra-policy.conf").status_code == 200
+    assert client.post("/admin/includes/save", data={
+        "csrf": csrf, "filename": "extra-policy.conf",
+        "body": "add_header X-Policy three always;", "note": "third"
+    }).status_code == 302
+    assert len(include_history(db, "extra-policy.conf")) == 3
+    assert db.execute("SELECT count(*) FROM operator_jobs").fetchone()[0] == 0
+    with pytest.raises(ValueError, match="simple"):
+        register_include(db, "../../../../nginx.conf", "bad")
+
+
+def test_stream_edit_and_removal_are_only_inventory(db, login):
+    client, csrf = login
+    add_stream(db, "service-tcp", "tcp", "127.0.0.1", 12345, "192.168.1.5:3000")
+    response = client.get("/admin/streams?edit=service-tcp")
+    assert response.status_code == 200
+    assert b"service-tcp" in response.data
+    assert client.post("/admin/streams/save", data={
+        "csrf": csrf, "name": "service-tcp", "protocol": "tcp",
+        "listen_host": "127.0.0.1", "listen_port": "12345",
+        "target": "192.168.1.5:3001"
+    }).status_code == 302
+    assert db.execute(
+        "SELECT target FROM stream_services WHERE name='service-tcp'"
+    ).fetchone()[0] == "192.168.1.5:3001"
+    assert client.post("/admin/streams/delete", data={
+        "csrf": csrf, "name": "service-tcp", "confirm": "yes"
+    }).status_code == 302
+    assert db.execute("SELECT count(*) FROM stream_services").fetchone()[0] == 0
