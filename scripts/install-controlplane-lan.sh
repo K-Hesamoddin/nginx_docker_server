@@ -45,10 +45,10 @@ ExecStart=/bin/bash $ROOT/scripts/start-controlplane-lan.sh
 Restart=on-failure
 RestartSec=10
 UMask=0077
+# User-managed systemd services already run unprivileged. Avoid
+# CapabilityBoundingSet/PrivateTmp/RestrictSUIDSGID here because they may
+# require privileges unavailable to the user service manager on this host.
 NoNewPrivileges=yes
-PrivateTmp=yes
-RestrictSUIDSGID=yes
-CapabilityBoundingSet=
 LimitNOFILE=1024
 
 [Install]
@@ -56,11 +56,25 @@ WantedBy=default.target
 EOF
 chmod 600 "$UNIT"
 systemctl --user daemon-reload
-systemctl --user enable --now nginx-controlplane-v2.service
-echo "Installed user service nginx-controlplane-v2.service"
-echo "Direct private-LAN URL: https://$PANEL_LAN_IP:8787/admin"
+# Always restart an existing installed unit, not just enable it. Previous
+# attempts may have failed with 218/CAPABILITIES before reaching Gunicorn.
+systemctl --user reset-failed nginx-controlplane-v2.service 2>/dev/null || true
+systemctl --user enable nginx-controlplane-v2.service
+systemctl --user restart nginx-controlplane-v2.service
+sleep 2
+if ! systemctl --user is-active --quiet nginx-controlplane-v2.service; then
+  echo "ERROR: Panel failed to stay running. Recent service logs:" >&2
+  journalctl --user -u nginx-controlplane-v2.service -n 30 --no-pager >&2 || true
+  exit 1
+fi
+if ! ss -ltn "( sport = :8787 )" | grep -Fq "$PANEL_LAN_IP:8787"; then
+  echo "ERROR: Panel service is active but not listening on $PANEL_LAN_IP:8787" >&2
+  systemctl --user --no-pager status nginx-controlplane-v2.service >&2 || true
+  exit 1
+fi
+echo "Panel is running and listening on $PANEL_LAN_IP:8787."
+echo "LAN URL: https://$PANEL_LAN_IP:8787/admin"
 echo "This service cannot deploy Nginx or issue certificates."
 echo "For boot persistence after SSH logout, administrator must separately allow linger:"
 echo "  sudo loginctl enable-linger $(id -un)"
-echo "User-service status:"
 systemctl --user --no-pager status nginx-controlplane-v2.service || true
