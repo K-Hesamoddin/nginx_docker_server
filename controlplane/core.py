@@ -236,12 +236,13 @@ def resolve_certificate(conn: sqlite3.Connection, ssl_dir: str | Path,
         except (OSError, ValueError, x509.ExtensionNotFound):
             continue
         if any(matches(pattern, name) for pattern in info.names):
-            # Exact SAN preferred; shared wildcard is fallback for expired/missing dedicated.
-            exact = name in info.names
-            candidates.append((0 if exact else 1, info.stub, info))
+            # Dedicated cert wins when valid. For multiple wildcard generations
+            # pick the freshest cert, not lexicographically smallest fingerprint.
+            priority = 0 if row["kind"] == "dedicated" else 1
+            candidates.append((priority, -info.expires.timestamp(), info.stub, info))
     if not candidates:
         raise ValueError(f"No valid certificate (including wildcard) for {name}")
-    return min(candidates, key=lambda x: (x[0], x[1]))[2]
+    return min(candidates, key=lambda x: (x[0], x[1], x[2]))[3]
 
 
 def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) -> str:
