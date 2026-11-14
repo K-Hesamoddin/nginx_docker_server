@@ -106,3 +106,55 @@ def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
         "live_cert_paths": cert_refs,
         "scope": "Read-only heuristic audit; does not compare TLS trust, full Nginx semantics or other includes.",
     }
+
+
+def audit_all(conn: sqlite3.Connection, dump: str, include_matches: bool = False) -> dict:
+    """Batch route inventory audit, one nginx -T capture, no config changes.
+
+    A missing config heading is *unverified*, never assumed to be inactive.
+    Any parser warning is considered a mismatch requiring a manual review.
+    """
+    if not CONFIG_HEADER.search(dump):
+        raise ValueError("Input is not a complete-looking nginx -T dump: no config headers")
+    domains = [
+        row["name"] for row in
+        conn.execute("SELECT name FROM domains WHERE enabled=1 ORDER BY name")
+    ]
+    if not domains:
+        raise ValueError("No enabled domains in inventory")
+    summary = {
+        "total": len(domains),
+        "matched": 0,
+        "drift": 0,
+        "unverified": 0,
+        "findings": [],
+        "scope": ("Read-only audit of simple location/proxy_pass mappings only. "
+                  "A match does not verify all Nginx directives or TLS.")
+    }
+    for domain in domains:
+        try:
+            result = audit_live(conn, dump, domain)
+        except ValueError as exc:
+            summary["unverified"] += 1
+            summary["findings"].append({
+                "domain": domain, "status": "unverified",
+                "reason": str(exc),
+            })
+            continue
+        if result["routes_match"]:
+            summary["matched"] += 1
+            if include_matches:
+                summary["findings"].append({
+                    "domain": domain, "status": "matched",
+                    "routes": result["expected_route_count"]
+                })
+        else:
+            summary["drift"] += 1
+            summary["findings"].append({
+                "domain": domain, "status": "drift",
+                "expected_routes": result["expected_route_count"],
+                "live_routes": result["live_route_count"],
+                "mismatches": result["mismatches"],
+                "notes": result["notes"],
+            })
+    return summary
