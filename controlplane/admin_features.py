@@ -246,6 +246,24 @@ def known_inventory_hosts(conn: sqlite3.Connection) -> set[str]:
     return hosts
 
 
+def archived_certificate_paths(conn: sqlite3.Connection) -> dict[str, list[str]]:
+    """Expose public cert *file references* from snapshots, never key paths."""
+    found: dict[str, set[str]] = {}
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='config_versions'"
+    ).fetchone():
+        return {}
+    for row in conn.execute(
+        "SELECT domain,body FROM config_versions WHERE origin='live_snapshot'"
+    ):
+        refs = set(re.findall(
+            r"(?m)^\s*ssl_certificate\s+(/etc/nginx/ssl/[a-zA-Z0-9_.-]+\.crt)\s*;",
+            row["body"]
+        ))
+        found.setdefault(row["domain"], set()).update(refs)
+    return {domain: sorted(paths) for domain, paths in found.items()}
+
+
 def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
     """Conservative suggestions for known .ir and .com suffixes only.
 
@@ -261,6 +279,7 @@ def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
             continue
         zone = ".".join(labels[-2:])
         groups.setdefault(zone, set()).add(domain)
+    cert_refs = archived_certificate_paths(conn)
     results = []
     for zone, members in sorted(groups.items()):
         covered = sorted(d for d in members if d == zone or matches("*." + zone, d))
@@ -272,6 +291,11 @@ def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
             "not_covered": uncovered,
             "count": len(covered),
             "requires_dns_confirmation": True,
+            "archived_cert_paths": sorted({
+                path for host, paths in cert_refs.items()
+                if host == zone or matches("*." + zone, host)
+                for path in paths
+            }),
         })
     # Deep hostnames require a separate wildcard at a deeper DNS zone.
     # Suggest them separately instead of falsely claiming *.apex covers them.
@@ -295,6 +319,11 @@ def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
                 "count": len(relevant),
                 "requires_dns_confirmation": True,
                 "nested_zone": True,
+                "archived_cert_paths": sorted({
+                    path for host, paths in cert_refs.items()
+                    if host == zone or matches("*." + zone, host)
+                    for path in paths
+                }),
             })
     for result in results:
         result.setdefault("nested_zone", False)
