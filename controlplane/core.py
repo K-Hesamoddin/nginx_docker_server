@@ -362,8 +362,8 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str, *,
     cert = certs[domain]
     lines += ["server {", "    listen 443 ssl;", "    listen [::]:443 ssl;",
               "    http2 on;", f"    server_name {domain};",
-              f"    ssl_certificate /etc/nginx/ssl/{cert.stub}.crt;",
-              f"    ssl_certificate_key /etc/nginx/ssl/{cert.stub}.key;",
+              f"    ssl_certificate /etc/nginx/ssl/{cert}.crt;",
+              f"    ssl_certificate_key /etc/nginx/ssl/{cert}.key;",
               f"    client_max_body_size {d['body_limit_mb']}m;",
               "    server_tokens off;"]
     if d["security_profile"] == "legacy":
