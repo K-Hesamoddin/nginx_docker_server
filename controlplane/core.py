@@ -387,6 +387,34 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str, *,
         lines += ["    ssl_protocols TLSv1.2 TLSv1.3;",
                   "    add_header X-Content-Type-Options nosniff always;",
                   "    add_header Referrer-Policy strict-origin-when-cross-origin always;"]
+    # Optional staged per-host controls. These are not retroactive changes to
+    # the original V1 live config, and require explicit draft generation.
+    has_security = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='security_options'"
+    ).fetchone() is not None
+    if has_security:
+        flags = conn.execute("SELECT * FROM security_options WHERE domain=?",
+                             (domain,)).fetchone()
+        if flags:
+            if flags["hsts"]:
+                lines.append('    add_header Strict-Transport-Security "max-age=31536000" always;')
+            if flags["nosniff"]:
+                lines.append('    add_header X-Content-Type-Options "nosniff" always;')
+            if flags["xframe"]:
+                lines.append('    add_header X-Frame-Options "SAMEORIGIN" always;')
+    has_includes = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='domain_includes'"
+    ).fetchone() is not None
+    if has_includes:
+        from .admin_features import INCLUDE_NAME
+        for inc in conn.execute("SELECT filename FROM domain_includes WHERE domain=? ORDER BY filename",
+                                (domain,)):
+            filename = inc["filename"]
+            if not INCLUDE_NAME.fullmatch(filename):
+                raise ValueError("Unsafe staged include name")
+            directive = f"    include /etc/nginx/conf.d/includes/{filename};"
+            if directive not in lines:
+                lines.append(directive)
     routes = conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY id",
                           (domain,)).fetchall()
     if not routes:
