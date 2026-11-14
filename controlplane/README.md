@@ -70,6 +70,36 @@ python -m controlplane.cli export-legacy > /tmp/v2-domains-export.list
 Compare the exported routes and flags to the original. Do not run
 `apply` on a live host until the migration is reviewed.
 
+## Auditing the live Nginx config without certificate keys
+
+After a successful lab import, compare its registered routes with the
+currently running (unmodified) Nginx configuration:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+source .venv/bin/activate
+export CONTROLPLANE_ROOT="$PWD"
+export CONTROLPLANE_DB="$PWD/data/migration-review.sqlite3"
+
+sudo docker exec nginx-proxy nginx -T 2>/dev/null | \
+  python -m controlplane.cli audit-live --domain micmodshop.ir --stdin
+```
+
+The command prints a small JSON report and never writes a certificate or
+Nginx file. It tests all imported locations (host/port, URI prefix stripping)
+against the matching `/etc/nginx/conf.d/auto/{domain}.conf` section of
+`nginx -T`. It also reports detected header, HTTP/2, IPv6, buffering
+features and the referenced certificate *paths*, not private keys.
+Exit code 0 means route comparison passed, 2 means drift, 1 means malformed
+input or a missing config. This is a limited semantic comparison, **not**
+a proof of Nginx config equivalence or TLS validity. Never upload the full
+`nginx -T` dump because it may contain secrets.
+
+The legacy renderer now retains observed HTTP/2, IPv6 listen, forwarding
+headers, unconditional legacy websocket headers, buffer include, access/error
+logging and original route ordering. Nonlegacy policy profiles remain
+opt-in. Review `proxy_pass` URI semantics for each route before any rollout.
+
 ## Local-only dashboard
 
 Generate a password hash using:
