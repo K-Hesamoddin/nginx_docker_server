@@ -173,6 +173,8 @@ def queue_deployment(conn: sqlite3.Connection, domain: str,
     row = load_version(conn, domain, revision_id)
     if row["origin"] == "live_snapshot":
         raise ValueError("A legacy snapshot is reference-only; save it as a reviewed manual draft")
+    if "PENDING-SSL-" in row["body"]:
+        raise ValueError("SSL is not available: request a certificate and generate a fresh revision")
     if f"# Managed by nginx-control-plane-v2: {domain}" not in row["body"].splitlines()[:4]:
         raise ValueError("Managed V2 header missing; cannot enqueue")
     with conn:
