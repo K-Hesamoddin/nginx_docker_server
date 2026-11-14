@@ -5,7 +5,7 @@
 Current capabilities:
 - Local-only password-protected and CSRF-protected Flask admin UI for domains, routes, registered certificates and policy profile.
 - SQLite inventory with idempotent legacy domains.list import and export for compatibility.
-- Certificate resolver chooses valid exact dedicated SAN first, then valid matching wildcard SAN; blocks config generation if no cert.
+- Certificate resolver chooses a valid dedicated SAN first, then matching wildcard SAN. Drafts can show PENDING-SSL, but live render and queued deploy of those drafts are blocked.
 - DNS-01 wildcard issue via acme.sh dns_nsin plugin (NSIN API credentials in environment only). No self-signed production fallback.
 - Explicit per-domain draft generation, manual editor, immutable revision history, diffs and queued deploy/SSL requests (web UI; queue is not executed yet).
 - Tests and GitHub Actions checks.
@@ -225,6 +225,64 @@ open `http://127.0.0.1:8787/` to log in; `/manage` lists saved snapshots.
 The lab database contains original configuration text that may have secrets:
 protect it as sensitive data and keep a permissions-restricted SQLite backup.
 Stop the test panel with Ctrl+C. Never expose port 8787 to the public Internet.
+
+## Modern admin hub (feature preview only)
+
+After updating the lab branch, stop the **old** Gunicorn process with Ctrl+C
+and restart with `bash scripts/start-controlplane-lab.sh`. Existing config
+snapshots and route inventory remain in `data/migration-review.sqlite3`.
+The first start of the new multi-user build prompts for the initial admin
+password and stores its salted hash in SQLite; later starts detect the existing
+users and do not reset their password. The login username is `admin`.
+
+Pages available after login:
+
+- `/admin`: compact starting dashboard with domain, revision, SSL and job counts.
+- `/manage`: searchable domain cards; choose one to inspect routes, original
+  `live_snapshot`, manual config editor, immutable history and diffs.
+- `/admin/ssl`: unified wildcard proposals derived from the known `.ir` / `.com`
+  hostnames. A proposal for `zone` includes `zone` and `*.zone`. A separate
+  `*.erp.micromodern.ir` is needed to cover `test.erp.micromodern.ir`;
+  `*.micromodern.ir` alone does not cover nested hosts. DNS authority and ACME
+  ownership are NOT verified by these proposals. SSL requests stay pending.
+- `/admin/users`: create a second user, choose `viewer`, `editor` or `admin`,
+  change passwords/roles and deactivate a user. Sessions are revoked when
+  an account is changed. The last admin cannot be disabled.
+- `/admin/access`: edit the CIDR allowlist. Defaults are `127.0.0.1/32`,
+  `::1/128`, **`192.168.1.192/32`**. Access is determined from the direct
+  socket peer, never from untrusted X-Forwarded-For headers. Public networks
+  are rejected. Loopback access cannot be removed.
+- `/admin/includes`: opt-in HSTS (without includeSubDomains), nosniff and
+  X-Frame-Options per domain; a catalog of whitelisted .conf basenames;
+  per-domain include selection; and immutable editor/diff history for staged
+  custom security snippets. REGISTERING OR EDITING an include does not
+  create or change any file in the real Nginx container.
+- `/admin/streams`: add/update/remove staged TCP/UDP mappings, choose a
+  local listen IP, and create previews. Stream requires Nginx stream module,
+  top-level stream {} configuration and explicit Docker port mapping in any
+  future deployment. No port is opened from this page.
+
+Security restrictions: only `admin` can manage users/CIDRs and queue SSL or
+deployment requests; `editor` can stage domain, include and stream edits;
+`viewer` can read but not write. Every edit uses the same CSRF-protected login
+session. **Not ready for public or shared-LAN exposure**: the launcher stays
+bound to 127.0.0.1:8787 and you reach it through an SSH tunnel. Adding
+`192.168.1.192` to the application's allowlist does not make the listener
+reachable from that computer. If LAN-direct access is introduced in future,
+it must sit behind trusted HTTPS, firewall/VPN restrictions and source-IP
+enforcement at the real ingress, particularly when proxied.
+
+The database may contain sensitive archived nginx -T text, credentials
+embedded in manual configuration, and password hashes. Protect it as
+confidential infrastructure data and back it up with file permissions 0600.
+
+Still outstanding for a production panel: secured privileged worker to
+execute approved immutable per-domain deployments with `nginx -t`, staged
+atomic release, reload, persistent rollback and tested job logs; NSIN DNS-01
+certificate issuance/renewal; live stream-module/port discovery and stream
+deployment; hardened multi-user auth (lockout/MFA), external TLS checks,
+and full end-to-end testing. No Docker Compose restart is required for
+reading this preview, and no production Nginx change has been made.
 
 ## Local-only dashboard
 
