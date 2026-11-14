@@ -13,7 +13,7 @@ from flask import (
     request, session, url_for,
 )
 
-from .core import hostname, open_db, resolve_certificate
+from .core import audit, hostname, open_db, resolve_certificate, save_route
 from .management import (
     config_history, ensure_schema, generate_revision, load_version,
     queue_certificate, queue_deployment, revision_diff, store_version,
@@ -76,10 +76,34 @@ Reason: {{tls_result.reason}}</p>
 <p>نسخه پیش‌نویس: {{head.draft_version_id if head else 'ندارد'}} |
 منتشرشده توسط V2: {{head.deployed_version_id if head and head.deployed_version_id else 'هیچ نسخه‌ای'}}.</p>
 <h2>Routeهای تعریف‌شده</h2>
-<table><tr><th>Path</th><th>Upstream</th><th>Proxy URI</th><th>Strip prefix</th><th>WebSocket</th></tr>
-{% for r in routes %}<tr><td>{{r.path}}</td><td>{{r.target}}</td><td>{{r.proxy_uri if r.proxy_uri is not none else 'default'}}</td><td>{{r.strip_prefix}}</td><td>{{r.websocket}}</td></tr>{% endfor %}</table>
-<p>برای افزودن یا تغییر Route از <a href="/">فرم دامنه‌ها و Routeها</a> استفاده کن.
-تغییر Routeها به‌تنهایی هیچ فایل کانفیگی نمی‌سازد.</p>
+<p>ویرایش یا حذف Route فقط در دیتابیس ثبت می‌شود؛ پیش‌نویس و کانفیگ زنده تا فشردن «ساخت نسخه جدید» تغییر نمی‌کند.</p>
+{% for r in routes %}
+<form method="post" action="{{url_for('manager.route_upsert',domain=domain)}}" class="row">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Location <input dir="ltr" name="path" value="{{r.path}}" readonly required></label>
+<label>Upstream <input dir="ltr" name="target" value="{{r.target}}" required></label>
+<label>Proxy URI <input dir="ltr" name="proxy_uri" value="{{r.proxy_uri if r.proxy_uri is not none else ''}}" placeholder="Use strip-prefix setting"></label>
+<label><input type="checkbox" name="strip" {% if r.strip_prefix %}checked{% endif %}>Strip prefix</label>
+<label><input type="checkbox" name="ws" {% if r.websocket %}checked{% endif %}>WebSocket</label>
+<button>ذخیره Route</button>
+</form>
+<form method="post" action="{{url_for('manager.route_delete',domain=domain)}}">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="id" value="{{r.id}}">
+<label><input type="checkbox" name="confirm" value="yes" required> حذف {{r.path}} را تأیید می‌کنم</label>
+<button>حذف مسیر</button>
+</form>
+{% endfor %}
+<h2>Route جدید</h2>
+<form method="post" action="{{url_for('manager.route_upsert',domain=domain)}}" class="row">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<label>Location <input dir="ltr" name="path" value="/" required></label>
+<label>Backend <input dir="ltr" name="target" placeholder="192.168.1.178:3000" required></label>
+<label>Proxy URI <input dir="ltr" name="proxy_uri" placeholder="e.g. /health; empty = default"></label>
+<label><input type="checkbox" name="strip" checked>Strip prefix</label>
+<label><input type="checkbox" name="ws">WebSocket</label>
+<button>افزودن Route</button>
+</form>
 <form method="post" action="{{url_for('manager.generate',domain=domain)}}">
 <input type="hidden" name="csrf" value="{{csrf}}">
 <button>۱. ساخت نسخه جدید از Routeها</button>
@@ -214,6 +238,39 @@ def _post_action(domain, action):
     except (ValueError, KeyError, TypeError) as exc:
         flash(str(exc), "error")
     return redirect(url_for("manager.detail", domain=domain))
+
+
+@bp.post("/manage/<domain>/routes")
+def route_upsert(domain):
+    def action(conn, d):
+        save_route(conn, d, request.form["path"], request.form["target"],
+                   strip_prefix=request.form.get("strip") == "on",
+                   websocket=request.form.get("ws") == "on",
+                   proxy_uri=request.form.get("proxy_uri") or None)
+        return "Route در دیتابیس ذخیره شد؛ پیش‌نویس قبلی و Nginx دست‌نخورده‌اند."
+    return _post_action(domain, action)
+
+
+@bp.post("/manage/<domain>/routes/delete")
+def route_delete(domain):
+    def action(conn, d):
+        if request.form.get("confirm") != "yes":
+            raise ValueError("حذف Route باید تأیید شود")
+        route_id = int(request.form["id"])
+        count = conn.execute(
+            "SELECT count(*) FROM routes WHERE domain=?", (d,)
+        ).fetchone()[0]
+        if count < 2:
+            raise ValueError("آخرین Route دامنه را نمی‌توان حذف کرد")
+        with conn:
+            deleted = conn.execute(
+                "DELETE FROM routes WHERE id=? AND domain=?", (route_id, d)
+            ).rowcount
+            if not deleted:
+                raise ValueError("Route مربوط به این دامنه پیدا نشد")
+            audit(conn, "route-delete", f"{d} id:{route_id}")
+        return "Route حذف شد؛ نسخه‌های ذخیره‌شده و Nginx تغییری نکرده‌اند."
+    return _post_action(domain, action)
 
 
 @bp.post("/manage/<domain>/generate")
