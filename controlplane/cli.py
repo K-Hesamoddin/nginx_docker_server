@@ -195,9 +195,13 @@ def main(argv=None):
                     if not args.domain or name == args.domain + ".conf":
                         print(f"##### {name}\n{text}")
             elif args.command == "apply":
-                if not args.yes:
-                    parser.error("apply requires --yes after preview and backups")
-                apply_config(conn, root, ssl_dir, args.allow_replace_v1)
+                # Bulk regeneration from domains.list would erase hand-edited V1
+                # configs, especially those marked with legacy flag 0.
+                # V2 uses immutable revisions and per-domain approval instead.
+                raise ValueError(
+                    "Bulk apply is disabled: select and approve a saved per-domain "
+                    "revision in /manage. No automatic regeneration is permitted."
+                )
             elif args.command == "issue-wildcard":
                 issue_wildcard(conn, root, db_file, ssl_dir, args.zone, args.acme_bin)
             elif args.command == "configure-renewal-hook":
