@@ -249,6 +249,31 @@ def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
             "count": len(covered),
             "requires_dns_confirmation": True,
         })
+    # Deep hostnames require a separate wildcard at a deeper DNS zone.
+    # Suggest them separately instead of falsely claiming *.apex covers them.
+    nested_zones = set()
+    for group in results:
+        for name in group["not_covered"]:
+            labels = name.split(".")
+            if len(labels) >= 4:
+                nested_zones.add(".".join(labels[-3:]))
+    for zone in sorted(nested_zones):
+        if zone in groups:
+            continue
+        relevant = sorted(name for name in names if name == zone or
+                          matches("*." + zone, name))
+        if relevant:
+            results.append({
+                "zone": zone,
+                "wildcard": "*." + zone,
+                "covered": relevant,
+                "not_covered": [],
+                "count": len(relevant),
+                "requires_dns_confirmation": True,
+                "nested_zone": True,
+            })
+    for result in results:
+        result.setdefault("nested_zone", False)
     return sorted(results, key=lambda g: (-g["count"], g["zone"]))
 
 
