@@ -193,6 +193,39 @@ certbot, DNS API calls, reload or Compose. A locked-down privileged runner,
 approval policy, CA/DNS provider integration, staging tests and rollback
 must be completed before enabling execution. Do NOT expose this UI publicly.
 
+## Verified migration checkpoint
+
+On 2026-11-14 the operator reported `32 passed`, then `snapshot-live`
+recorded `{ "stored": 29, "unchanged": 0, "missing": [] }` from the running
+Nginx. These are **reference-only archives in the lab SQLite DB**. They do
+not imply that 29 sites are V2-managed or that rollback is ready.
+
+Per-domain Route Add/Edit/Delete is available directly on `/manage/<domain>`.
+Every route mutation affects only the DB; the existing draft and running
+configuration remain unchanged until an explicit Generate + reviewed
+deployment. The last route of a domain cannot be deleted in the UI.
+
+To run the staging panel on the existing host without exposing a public port,
+use the dedicated launcher rather than starting Flask's development server:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+git pull --ff-only
+source .venv/bin/activate
+export CONTROLPLANE_DB="$PWD/data/migration-review.sqlite3"
+bash scripts/start-controlplane-lab.sh
+```
+
+The launcher prompts for a password (12+ characters) without saving the
+plaintext password or inserting it in shell history. It refuses root and
+binds Gunicorn to 127.0.0.1:8787 only. From a workstation with SSH access,
+forward localhost:8787 to the same existing server SSH destination and
+open `http://127.0.0.1:8787/` to log in; `/manage` lists saved snapshots.
+
+The lab database contains original configuration text that may have secrets:
+protect it as sensitive data and keep a permissions-restricted SQLite backup.
+Stop the test panel with Ctrl+C. Never expose port 8787 to the public Internet.
+
 ## Local-only dashboard
 
 Generate a password hash using:
