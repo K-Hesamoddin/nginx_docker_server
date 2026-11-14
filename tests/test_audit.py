@@ -140,10 +140,9 @@ def test_batch_audit_all_statuses(tmp_path):
         "# configuration file /etc/nginx/conf.d/auto/other.conf:\n"
         "server { listen 80; }\n",
         "# configuration file /etc/nginx/conf.d/auto/www.hibarco.com.conf:\n"
-        "server {\n  listen 443 ssl;\n  location / { proxy_pass http://192.168.1.112:80/; }\n}\n"
+        "server {\n  listen 443 ssl;\n  location / { proxy_pass http://192.168.1.112:9999/; }\n}\n"
     )
-    # The simplistic parser intentionally requires proxy_pass on its own line
-    # and reports a parser warning as drift, not success.
+    # An altered upstream must be classified as drift, not success.
     report = audit_all(conn, multi)
     assert report["total"] == 3
     assert report["matched"] == 1
