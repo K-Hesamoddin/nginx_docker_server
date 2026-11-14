@@ -213,3 +213,15 @@ def test_stream_edit_and_removal_are_only_inventory(db, login):
         "csrf": csrf, "name": "service-tcp", "confirm": "yes"
     }).status_code == 302
     assert db.execute("SELECT count(*) FROM stream_services").fetchone()[0] == 0
+
+
+def test_management_search_filters_domain_cards(db, login):
+    client, _ = login
+    full = client.get("/manage")
+    assert full.status_code == 200
+    assert b"cloud.micromodern.ir" in full.data
+    result = client.get("/manage?q=cloud")
+    assert result.status_code == 200
+    assert b"cloud.micromodern.ir" in result.data
+    assert b"micmodshop.ir" not in result.data
+    assert b"ssl" in result.data.lower()
