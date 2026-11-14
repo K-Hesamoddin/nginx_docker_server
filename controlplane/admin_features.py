@@ -8,6 +8,8 @@ from __future__ import annotations
 import ipaddress
 import re
 import sqlite3
+import hashlib
+import difflib
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -51,6 +53,16 @@ def ensure_features(conn: sqlite3.Connection, bootstrap_hash: str | None = None)
                CHECK(status IN ('reference','staged')),
             description TEXT NOT NULL DEFAULT ''
         );
+        CREATE TABLE IF NOT EXISTS include_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL REFERENCES include_catalog(filename),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            body TEXT NOT NULL,
+            sha256 TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS ix_include_versions_file
+            ON include_versions(filename,id);
         CREATE TABLE IF NOT EXISTS stream_services (
             name TEXT PRIMARY KEY,
             protocol TEXT NOT NULL CHECK(protocol IN ('tcp','udp')),
@@ -326,3 +338,69 @@ def stream_preview(conn: sqlite3.Connection, name: str) -> str:
         conn.execute("INSERT INTO stream_versions(name,body) VALUES(?,?)", (name, body))
         audit(conn, "stream-preview", name)
     return body
+
+
+
+def save_include_revision(conn: sqlite3.Connection, filename: str, body: str, note: str = "") -> int:
+    """Keep custom Nginx snippets in SQLite for review; NEVER deploy directly."""
+    if not INCLUDE_NAME.fullmatch(filename):
+        raise ValueError("Only simple *.conf filenames are permitted")
+    if not conn.execute("SELECT 1 FROM include_catalog WHERE filename=?", (filename,)).fetchone():
+        raise ValueError("Register the include filename first")
+    if not isinstance(body, str) or not body.strip() or "\x00" in body:
+        raise ValueError("Snippet must not be empty or contain NUL")
+    body = body.replace("\r\n", "\n")
+    if len(body.encode("utf-8")) > 64 * 1024:
+        raise ValueError("Snippet exceeds 64 KiB")
+    with conn:
+        cur = conn.execute(
+            """INSERT INTO include_versions(filename,body,sha256,note)
+               VALUES(?,?,?,?)""",
+            (filename, body, hashlib.sha256(body.encode("utf-8")).hexdigest(), note[:500])
+        )
+        conn.execute("UPDATE include_catalog SET status='staged' WHERE filename=?",
+                     (filename,))
+        audit(conn, "include-version", f"{filename} #{cur.lastrowid}")
+    return cur.lastrowid
+
+
+def include_history(conn: sqlite3.Connection, filename: str) -> list[sqlite3.Row]:
+    if not INCLUDE_NAME.fullmatch(filename):
+        raise ValueError("Invalid include filename")
+    return conn.execute(
+        """SELECT id,created_at,sha256,note FROM include_versions
+           WHERE filename=? ORDER BY id DESC LIMIT 40""",
+        (filename,)
+    ).fetchall()
+
+
+def include_version_diff(conn: sqlite3.Connection, filename: str, version_id: int):
+    if not INCLUDE_NAME.fullmatch(filename):
+        raise ValueError("Invalid include filename")
+    row = conn.execute(
+        "SELECT * FROM include_versions WHERE filename=? AND id=?",
+        (filename, version_id)
+    ).fetchone()
+    if not row:
+        raise ValueError("Include revision not found")
+    prev = conn.execute(
+        """SELECT id,body FROM include_versions WHERE filename=? AND id<?
+           ORDER BY id DESC LIMIT 1""",
+        (filename, version_id)
+    ).fetchone()
+    before = prev["body"] if prev else ""
+    diff = "".join(difflib.unified_diff(
+        before.splitlines(keepends=True), row["body"].splitlines(keepends=True),
+        fromfile=f"v{prev['id']}" if prev else "empty", tofile=f"v{version_id}"
+    ))
+    return row, diff
+
+
+def delete_stream(conn: sqlite3.Connection, name: str):
+    """Remove a staged stream definition. Do not remove past previews or live files."""
+    if not STREAM_NAME.fullmatch(name):
+        raise ValueError("Invalid stream identifier")
+    with conn:
+        if conn.execute("DELETE FROM stream_services WHERE name=?", (name,)).rowcount == 0:
+            raise ValueError("Stream not found")
+        audit(conn, "stream-delete-staging", name)
