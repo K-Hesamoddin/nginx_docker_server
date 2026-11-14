@@ -137,9 +137,15 @@ def create_app():
             if not is_allowed_peer(conn, request.remote_addr or ""):
                 abort(403)
             user = get_session_user(conn, session)
-        if request.path in ("/", "/login") and request.method == "GET":
+        if request.path == "/" and request.method == "GET":
+            # A revoked user must not see the legacy inventory even if an
+            # earlier signed session still carries auth=True.
+            if user is None and session.get("auth"):
+                session.clear()
+            elif user is not None:
+                session["role"] = user["role"]
             return
-        if request.path == "/login" and request.method == "POST":
+        if request.path == "/login" and request.method in ("GET", "POST"):
             return
         if user is None:
             session.clear()
