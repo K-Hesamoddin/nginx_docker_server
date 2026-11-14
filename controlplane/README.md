@@ -30,6 +30,46 @@ First activation is a migration, not a blind replacement. Never run legacy setup
 8. python -m controlplane.cli preview --domain micmodshop.ir (requires registered valid SSL)
 9. python -m pytest -q tests/test_controlplane.py
 
+## Legacy `domains.list` migration (verified from production excerpt)
+
+Your actual file has two opaque flags before the domain, e.g.:
+
+```text
+1 0 micromodernonline.ir / 192.168.1.26:80 /product_backend/ 192.168.1.26:8001 /shop_backend/ 192.168.1.26:8000
+0 0 micmodshop.ir / 192.168.1.178:3000 /product_backend/ 192.168.1.178:1010 /shop_backend/ 192.168.1.178:2000
+0 0 hibarco.com / 192.168.1.112:80 /media/ 192.168.1.112:8000 /api/ 192.168.1.112:8000
+0 0 www.hibarco.com / 192.168.1.112:80 /media/ 192.168.1.112:8000 /api/ 192.168.1.112:8000
+```
+
+The V2 importer accepts both one-flag and two-flag lines, **does not treat
+`0 0` as a disabled hostname**, and preserves those fields verbatim for
+inventory/export. Their intended operational semantics are not assumed.
+Route order within each domain is preserved. For imported apex domains without
+a separately managed `www` row, a redirect alias can be generated. An
+explicit `www` row takes precedence over the redirect.
+
+Import is **all-or-nothing for malformed input**. An incomplete/truncated line
+must be repaired from the actual source file before importing; no domain name
+should be guessed from pasted output. Existing DB rows are left untouched.
+
+**Do not run `setup.sh` or the original
+`scripts/generate-{configs,certificates}.sh` on your live input**: those
+committed V1 scripts currently read a *single* flag and treat column 2 as
+the domain name. With your dual-flag file, they would instead parse `0`
+as the hostname. Treat the raw file and running `nginx -T` as distinct
+sources until the version drift has been investigated.
+
+For a read-only preview of imported inventory in a **fresh lab database**:
+
+```bash
+python -m controlplane.cli init
+python -m controlplane.cli import-legacy --file domains.list
+python -m controlplane.cli export-legacy > /tmp/v2-domains-export.list
+```
+
+Compare the exported routes and flags to the original. Do not run
+`apply` on a live host until the migration is reviewed.
+
 ## Local-only dashboard
 
 Generate a password hash using:
