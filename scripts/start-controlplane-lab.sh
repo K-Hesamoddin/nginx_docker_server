@@ -29,7 +29,7 @@ fi
 USER_ACCOUNTS_EXIST="$("$ROOT/.venv/bin/python" -c '
 import sqlite3, os
 conn = sqlite3.connect(os.environ["CONTROLPLANE_DB"])
-exists = conn.execute("SELECT count(*) FROM sqlite_master WHERE type=\x27table\x27 AND name=\x27panel_users\x27").fetchone()[0]
+exists = conn.execute("SELECT count(*) FROM sqlite_master WHERE type=? AND name=?", ("table", "panel_users")).fetchone()[0]
 print("yes" if exists and conn.execute("SELECT 1 FROM panel_users LIMIT 1").fetchone() else "no")
 conn.close()
 ')"
