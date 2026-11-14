@@ -26,7 +26,7 @@ def has_valid_wildcard(conn: sqlite3.Connection, ssl_dir: Path, zone: str,
     for row in conn.execute("SELECT stub FROM certificates WHERE zone=? AND kind='wildcard'", (zone,)):
         try:
             info = inspect_certificate(ssl_dir, row["stub"], min_days=min_days)
-        except (OSError, ValueError, subprocess.SubprocessError, Exception) as exc:
+        except Exception:
             # Invalid/expired cert does not count. Fail closed on trust failures.
             continue
         if {zone, f"*.{zone}"}.issubset(set(info.names)):
