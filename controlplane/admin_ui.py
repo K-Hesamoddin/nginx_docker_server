@@ -13,10 +13,10 @@ from flask import (
 )
 
 from .admin_features import (
-    add_allowed_net, add_stream, allowed_networks, ensure_features,
-    recommended_zones, register_include, remove_allowed_net,
-    set_domain_include, set_security_options, stream_preview,
-    user_update, user_upsert,
+    add_allowed_net, add_stream, allowed_networks, delete_stream, ensure_features,
+    include_history, include_version_diff, recommended_zones, register_include,
+    remove_allowed_net, save_include_revision, set_domain_include,
+    set_security_options, stream_preview, user_update, user_upsert,
 )
 from .core import hostname, open_db
 from .management import ensure_schema, queue_certificate
@@ -215,22 +215,48 @@ Viewer: مشاهده صرف. گذرواژه‌های کاربران به‌صو�
 <form method="post" action="{{url_for('settings.include_register')}}">
 <input type="hidden" name="csrf" value="{{csrf}}">
 <label>نام فایل (فقط .conf) <input dir="ltr" name="filename" placeholder="cors-custom.conf" required></label>
-<label>توضیح <input name="description" maxlength="250"></label>
+<label>توضیح <input name="description" maxlength="250" value="{{editing.description if editing else ''}}"></label>
 <button>ثبت نام Include برای بررسی</button></form>
-<p class="note">تغییر متن Includeهای سراسری یا Deploy آنها هنوز فعال نشده است؛ کاتالوگ فقط محل ثبت مرجع و انتخاب دامنه است.</p></section>
+<p class="note">فایل جدید صرفاً در کاتالوگ ثبت می‌شود. می‌توانی نسخه‌های متنی آن را در فرم زیر ذخیره و مقایسه کنی؛ انتشار روی سرور هنوز انجام نمی‌شود.</p></section>
+<section class="panel"><h2>ویرایش نسخه‌های Include (فقط Staging)</h2>
+<form method="get" action="{{url_for('settings.includes')}}">
+<input type="hidden" name="domain" value="{{domain}}">
+<label>Include <select name="include">
+{% for filename in catalog %}<option value="{{filename}}" {{'selected' if filename == snippet_filename else ''}}>{{filename}}</option>{% endfor %}
+</select></label>
+<button class="secondary">انتخاب Include</button></form>
+{% if snippet_filename %}
+<p class="muted">فایل <code>{{snippet_filename}}</code> فقط در SQLite نسخه‌بندی می‌شود؛
+تا زمانی که سرویس اجرایی محدود و تأییدشده نداشته باشیم، فایل‌های Nginx روی سرور تغییر نمی‌کنند.</p>
+<form method="post" action="{{url_for('settings.include_version_save')}}">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="filename" value="{{snippet_filename}}">
+<label style="width:100%">متن کانفیگ Include
+<textarea dir="ltr" name="body" rows="12" style="width:100%;font:13px monospace" spellcheck="false" required>{{snippet_body}}</textarea></label>
+<label>توضیح تغییر <input name="note" maxlength="500"></label>
+<button>ذخیره نسخه جدید Include</button></form>
+<h3>تاریخچه Include</h3><div class="tablewrap"><table><tr><th>Version</th><th>UTC</th><th>SHA256</th><th>Note</th></tr>
+{% for v in snippet_history %}
+<tr><td><a href="{{url_for('settings.includes',domain=domain,include=snippet_filename,version=v.id)}}">{{v.id}}</a></td>
+<td>{{v.created_at}}</td><td>{{v.sha256[:12]}}</td><td>{{v.note}}</td></tr>
+{% endfor %}</table></div>
+{% if snippet_diff %}<h3>Diff نسخه انتخاب‌شده</h3><pre>{{snippet_diff}}</pre>{% endif %}
+{% endif %}
+</section>
 
 {% elif page == 'streams' %}
 <h1>مدیریت Streamهای TCP / UDP</h1>
 <div class="alert">Stream به context اصلی Nginx، ماژول stream و Publish پورت Docker نیاز دارد.
 فعلاً فقط تعریف و Preview می‌شود و هیچ پورتی باز نمی‌شود.</div>
 <section class="panel"><h2>تعریف Stream جدید یا ویرایش Stream موجود</h2>
+<p>برای ویرایش، از جدول پایین «ویرایش» را انتخاب کن.</p>
 <form method="post" action="{{url_for('settings.stream_save')}}">
 <input type="hidden" name="csrf" value="{{csrf}}">
-<label>شناسه <input dir="ltr" name="name" placeholder="internal-redis" required></label>
-<label>پروتکل <select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
-<label>Listen IP <input dir="ltr" name="listen_host" value="127.0.0.1" required></label>
-<label>Listen port <input dir="ltr" name="listen_port" type="number" min="1" max="65535" required></label>
-<label>Backend <input dir="ltr" name="target" placeholder="192.168.1.20:6379" required></label>
+<label>شناسه <input dir="ltr" name="name" placeholder="internal-redis" value="{{editing.name if editing else ''}}" required></label>
+<label>پروتکل <select name="protocol"><option value="tcp" {{'selected' if editing and editing.protocol=='tcp' else ''}}>TCP</option><option value="udp" {{'selected' if editing and editing.protocol=='udp' else ''}}>UDP</option></select></label>
+<label>Listen IP <input dir="ltr" name="listen_host" value="{{editing.listen_host if editing else '127.0.0.1'}}" required></label>
+<label>Listen port <input dir="ltr" name="listen_port" type="number" min="1" max="65535" value="{{editing.listen_port if editing else ''}}" required></label>
+<label>Backend <input dir="ltr" name="target" placeholder="192.168.1.20:6379" value="{{editing.target if editing else ''}}" required></label>
 <label>توضیح <input name="description" maxlength="250"></label>
 <button>ثبت در دیتابیس</button></form></section>
 <section class="panel"><h2>سرویس‌های ثبت‌شده</h2>
@@ -238,9 +264,16 @@ Viewer: مشاهده صرف. گذرواژه‌های کاربران به‌صو�
 {% for st in streams %}
 <tr><td>{{st.name}}</td><td>{{st.protocol}}</td><td>{{st.listen_host}}:{{st.listen_port}}</td>
 <td>{{st.target}}</td><td>Staged, not deployed</td>
-<td><form method="post" action="{{url_for('settings.stream_show')}}">
+<td><a href="{{url_for('settings.streams',edit=st.name)}}">ویرایش</a>
+<form method="post" action="{{url_for('settings.stream_show')}}">
 <input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="name" value="{{st.name}}">
-<button class="secondary">ساخت Preview</button></form></td></tr>
+<button class="secondary">ساخت Preview</button></form>
+<form method="post" action="{{url_for('settings.stream_remove')}}">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="name" value="{{st.name}}">
+<label><input type="checkbox" name="confirm" value="yes" required> حذف تعریف آزمایشی</label>
+<button class="danger">حذف</button></form>
+</td></tr>
 {% endfor %}
 </table></div></section>
 {% if stream_body %}<section class="panel"><h2>Preview آماده‌شده</h2><pre>{{stream_body}}</pre></section>{% endif %}
@@ -366,12 +399,40 @@ def includes():
             r["filename"] for r in
             db.execute("SELECT filename FROM domain_includes WHERE domain=?", (domain,))
         ]
+        snippet_filename = request.args.get("include", "")
+        if snippet_filename not in catalog:
+            snippet_filename = catalog[0] if catalog else ""
+        snippet_history = include_history(db, snippet_filename) if snippet_filename else []
+        snippet_body = ""
+        snippet_diff = ""
+        if snippet_history:
+            requested = request.args.get("version", type=int)
+            version_id = requested or snippet_history[0]["id"]
+            try:
+                version, snippet_diff = include_version_diff(db, snippet_filename, version_id)
+                snippet_body = version["body"]
+            except ValueError:
+                version, snippet_diff = include_version_diff(db, snippet_filename,
+                                                              snippet_history[0]["id"])
+                snippet_body = version["body"]
         row = db.execute(
             "SELECT * FROM security_options WHERE domain=?", (domain,)
         ).fetchone() if domain else None
         security = dict(row) if row else {"hsts": 0, "nosniff": 0, "xframe": 0}
     return _render("includes", domains=domains, domain=domain, catalog=catalog,
-                   selected_includes=selected, security=security)
+                   selected_includes=selected, security=security,
+                   snippet_filename=snippet_filename, snippet_history=snippet_history,
+                   snippet_body=snippet_body, snippet_diff=snippet_diff)
+
+
+@bp.post("/admin/includes/save")
+def include_version_save():
+    filename = request.form.get("filename", "")
+    return _try(
+        lambda db: save_include_revision(db, filename, request.form["body"],
+                                          request.form.get("note", "")),
+        url_for("settings.includes", include=filename)
+    )
 
 
 @bp.post("/admin/includes/register")
@@ -409,7 +470,9 @@ def security_save():
 def streams():
     with _connect() as db:
         entries = db.execute("SELECT * FROM stream_services ORDER BY name").fetchall()
-    return _render("streams", streams=entries, stream_body=None)
+        wanted = request.args.get("edit")
+        editing = next((item for item in entries if item["name"] == wanted), None)
+    return _render("streams", streams=entries, stream_body=None, editing=editing)
 
 
 @bp.post("/admin/streams/save")
@@ -434,4 +497,13 @@ def stream_show():
             flash(str(exc), "error")
             body = None
         entries = db.execute("SELECT * FROM stream_services ORDER BY name").fetchall()
-    return _render("streams", streams=entries, stream_body=body)
+    return _render("streams", streams=entries, stream_body=body, editing=None)
+
+
+@bp.post("/admin/streams/delete")
+def stream_remove():
+    def action(db):
+        if request.form.get("confirm") != "yes":
+            raise ValueError("حذف Stream را تأیید کن")
+        delete_stream(db, request.form["name"])
+    return _try(action, url_for("settings.streams"))
