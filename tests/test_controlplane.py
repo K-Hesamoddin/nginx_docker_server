@@ -103,3 +103,80 @@ def test_admin_uses_explicit_auth(tmp_path, monkeypatch):
         csrf = s["csrf"]
     assert client.post("/domains", data={"csrf": csrf, "name": "example.com"}).status_code == 302
     assert b"example.com" in client.get("/").data
+
+
+def test_real_two_flag_inventory_and_multiple_routes_roundtrip(tmp_path):
+    """Mirrors the actual deployment's 1 0 / 0 0 rows, not old one-flag examples."""
+    listing = tmp_path / "domains.list"
+    listing.write_text(
+        "1 0 micromodernonline.ir / 192.168.1.26:80 "
+        "/product_backend/ 192.168.1.26:8001 /shop_backend/ 192.168.1.26:8000\n"
+        "0 0 micmodshop.ir / 192.168.1.178:3000 "
+        "/product_backend/ 192.168.1.178:1010 /shop_backend/ 192.168.1.178:2000\n"
+        "0 0 hibarco.com / 192.168.1.112:80 "
+        "/media/ 192.168.1.112:8000 /api/ 192.168.1.112:8000\n"
+        "0 0 www.hibarco.com / 192.168.1.112:80 "
+        "/media/ 192.168.1.112:8000 /api/ 192.168.1.112:8000\n"
+        "0 0 test.erp.micromodern.ir / 192.168.200.2:80\n",
+        encoding="utf-8"
+    )
+    db = open_db(tmp_path / "db.sqlite3")
+    outcome = import_domains_list(db, listing)
+    assert outcome == {"imported": 5, "skipped": 0, "errors": []}
+    assert import_domains_list(db, listing)["skipped"] == 5
+    shop = db.execute("SELECT * FROM domains WHERE name='micmodshop.ir'").fetchone()
+    assert shop["enabled"] == 1  # zero is NOT a disabled-domain flag
+    assert shop["redirect_www"] == 1  # implicit www redirect
+    assert db.execute(
+        "SELECT redirect_www FROM domains WHERE name='hibarco.com'"
+    ).fetchone()[0] == 0  # www explicitly managed by its own row
+    assert db.execute(
+        "SELECT COUNT(*) FROM routes WHERE domain='micmodshop.ir'"
+    ).fetchone()[0] == 3
+    assert db.execute(
+        "SELECT COUNT(*) FROM routes WHERE domain='micromodernonline.ir'"
+    ).fetchone()[0] == 3
+
+    exported = export_domains_list(db)
+    assert ("0 0 micmodshop.ir / 192.168.1.178:3000 "
+            "/product_backend/ 192.168.1.178:1010 "
+            "/shop_backend/ 192.168.1.178:2000") in exported
+    assert "1 0 micromodernonline.ir / 192.168.1.26:80" in exported
+    assert "0 0 www.hibarco.com / 192.168.1.112:80" in exported
+    # A reimport into a fresh database retains the two-flag layout.
+    output = tmp_path / "export.list"
+    output.write_text(exported, encoding="utf-8")
+    restored = open_db(tmp_path / "restored.sqlite3")
+    assert import_domains_list(restored, output)["imported"] == 5
+
+
+def test_truncated_legacy_file_rolls_back_whole_import(tmp_path):
+    listing = tmp_path / "cutoff.list"
+    listing.write_text(
+        "1 0 micmodshop.ir / 192.168.1.178:3000\n"
+        "omodern.ir / 192.168.1.37:1000\n",
+        encoding="utf-8"
+    )
+    db = open_db(tmp_path / "db.sqlite3")
+    outcome = import_domains_list(db, listing)
+    assert outcome["imported"] == 0
+    assert "line 2" in outcome["errors"][0]
+    assert db.execute("SELECT COUNT(*) FROM domains").fetchone()[0] == 0
+
+
+def test_one_flag_compatibility_and_no_www_collision_on_late_addition(tmp_path, monkeypatch):
+    listing = tmp_path / "old.list"
+    listing.write_text("1 example.com / 192.168.1.178:3000\n")
+    db = open_db(tmp_path / "db.sqlite3")
+    assert import_domains_list(db, listing)["imported"] == 1
+    assert "1 example.com / 192.168.1.178:3000" in export_domains_list(db)
+
+    make_cert(tmp_path, "multi", ["example.com", "www.example.com"])
+    monkeypatch.setenv("CONTROLPLANE_CA_BUNDLE", str(tmp_path / "test-ca-bundle.pem"))
+    save_certificate(db, "example.com", "dedicated", "multi")
+    # The apex initially offers a www redirect.
+    assert "server_name www.example.com" in render_config(db, tmp_path, "example.com")
+    save_domain(db, "www.example.com")
+    save_route(db, "www.example.com", "/", "192.168.1.178:3000")
+    # Explicit website must now own its own www virtual host.
+    assert "server_name www.example.com" not in render_config(db, tmp_path, "example.com")
