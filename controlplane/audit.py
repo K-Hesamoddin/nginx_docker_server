@@ -62,6 +62,17 @@ def _parsed_locations(block: str) -> tuple[dict[str, str], list[str]]:
     return locations, warnings
 
 
+def _review_item(kind: str, location: str, expected: str | None,
+                 live: str | None) -> dict:
+    """Produce structured differences for manual review. Never auto-apply."""
+    return {
+        "kind": kind, "location": location,
+        "inventory_proxy_pass": expected,
+        "live_proxy_pass": live,
+        "requires_approval": True,
+    }
+
+
 def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
     """Return a report and an explicit pass/fail flag; no actual config changes."""
     domain = hostname(domain)
@@ -70,6 +81,7 @@ def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
     block = extract_live_block(dump, domain)
     live_routes, notes = _parsed_locations(block)
     mismatches = []
+    review_items = []
     expected = {}
     for r in conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY id", (domain,)):
         path, target = route_path(r["path"]), upstream(r["target"])
@@ -77,10 +89,19 @@ def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
     for path, url in expected.items():
         if path not in live_routes:
             mismatches.append(f"Missing live location: {path}")
+            review_items.append(_review_item("missing_live_location", path, url, None))
         elif live_routes[path] != url:
-            mismatches.append(f"{path}: expected {url}, live {live_routes[path]}")
-    for path in live_routes.keys() - expected.keys():
+            actual = live_routes[path]
+            mismatches.append(f"{path}: expected {url}, live {actual}")
+            if (url.endswith("/") and url[:-1] == actual or
+                    actual.endswith("/") and actual[:-1] == url):
+                kind = "proxy_pass_uri_semantics"
+            else:
+                kind = "upstream_or_uri_changed"
+            review_items.append(_review_item(kind, path, url, actual))
+    for path in sorted(live_routes.keys() - expected.keys()):
         mismatches.append(f"Extra live location: {path}")
+        review_items.append(_review_item("unmanaged_live_location", path, None, live_routes[path]))
 
     flags = {
         "http2": bool(re.search(r"(?m)^\s*http2\s+on\s*;", block)),
@@ -101,6 +122,7 @@ def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
         "live_route_count": len(live_routes),
         "routes_match": not mismatches and not notes,
         "mismatches": mismatches,
+        "review_items": review_items,
         "notes": notes,
         "live_features": flags,
         "live_cert_paths": cert_refs,
@@ -155,6 +177,7 @@ def audit_all(conn: sqlite3.Connection, dump: str, include_matches: bool = False
                 "expected_routes": result["expected_route_count"],
                 "live_routes": result["live_route_count"],
                 "mismatches": result["mismatches"],
+                "review_items": result["review_items"],
                 "notes": result["notes"],
             })
     return summary
