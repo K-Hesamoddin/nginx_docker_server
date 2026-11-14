@@ -1,5 +1,84 @@
 # Nginx Control Plane V2 (feature preview)
 
+## Direct private-LAN HTTPS access (no workstation tunnel)
+
+The LAN pilot is separate from Docker and the production nginx-proxy. It does
+not change ports 80/443, reload Nginx, apply configurations or issue certificates.
+**Only the operator with server shell access can run the following setup.**
+
+Stop the old 127.0.0.1:8787 Gunicorn process (Ctrl+C in the terminal that
+launched it). Then, as the ordinary `cms` user on the server:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+git pull --ff-only
+source .venv/bin/activate
+export CONTROLPLANE_DB="$PWD/data/migration-review.sqlite3"
+python -m pytest -q tests/
+sudo loginctl enable-linger cms
+bash scripts/install-controlplane-lan.sh
+```
+
+The installer first checks the existing lab DB and, only if no admin is
+configured, prompts for a NEW admin password (12+ characters, entered twice).
+It generates a locally self-signed IP-SAN certificate and a persistent secret
+under `data/panel-lan/` with mode 0600 (parent 0700). It installs a **user-scoped**
+systemd unit, and starts a single unprivileged HTTPS Gunicorn process on
+`192.168.1.205:8787`, NOT `0.0.0.0`. It needs no Docker restart.
+The service stays running after logout thanks to linger.
+
+From the allowed LAN workstation `192.168.1.192`, open:
+
+`https://192.168.1.205:8787/admin`
+
+Username: `admin`. The browser will warn that the self-signed certificate
+is not trusted; verify its fingerprint with the operator before accepting the
+one-time exception. This encrypts traffic but self-signed TLS is not a
+substitute for a certificate issued by a trusted local CA. Never use the
+plain HTTP URL or expose port 8787 via router/NAT. For broader production
+access, prefer a private trusted certificate and VPN/firewall ACL.
+
+Allowlist defaults to `127.0.0.1/32`, `::1/128` and
+**`192.168.1.192/32`**. Every request checks the direct socket source IP,
+ignoring X-Forwarded-For. Unauthorized IPs receive HTTP 403.
+The app ACL is not itself a packet-filtering firewall; for hard enforcement
+at the host ingress, add a *narrow* per-source firewall rule after reviewing
+the host's current firewall policies. Do not change blanket INPUT or Docker
+rules. On a host with active UFW and blocked port, an operator can permit
+only the desired source with:
+
+```bash
+sudo ufw status verbose
+# If UFW is active and port 8787 is blocked:
+sudo ufw allow from 192.168.1.192 to 192.168.1.205 port 8787 proto tcp
+```
+
+Server-side checks (do not affect Nginx):
+
+```bash
+systemctl --user --no-pager status nginx-controlplane-v2
+ss -ltn '( sport = :8787 )'
+openssl x509 -in data/panel-lan/server.crt -noout -fingerprint -sha256
+```
+
+If the administrator password is unknown after an upgrade, reset it **only
+from the server console** (not through a browser and not by deleting SQLite):
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+source .venv/bin/activate
+python scripts/controlplane_lan.py reset-admin-password
+```
+
+To restart only the panel after a later code update:
+
+`systemctl --user restart nginx-controlplane-v2`
+
+To inspect errors: `journalctl --user -u nginx-controlplane-v2 -n 60 --no-pager`.
+The UI remains a **staging panel only**. Deploy, SSL and stream publication
+buttons write pending jobs to SQLite and never touch production.
+
+
 > NOT DEPLOYED. Do not merge to main or run against production before audit.
 
 Current capabilities:
