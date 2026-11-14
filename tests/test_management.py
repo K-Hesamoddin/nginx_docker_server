@@ -199,3 +199,59 @@ def test_admin_tls_status_is_on_demand(app_client, db, monkeypatch):
     assert r.status_code == 200
     assert b"2027-01-01" in r.data
     assert called == ["micmodshop.ir"]
+
+
+def test_per_domain_route_forms_are_staged_and_protected(app_client, db):
+    client, csrf = app_client
+    assert client.get("/manage/micmodshop.ir").status_code == 200
+    assert client.post(
+        "/manage/micmodshop.ir/routes",
+        data={"path": "/health", "target": "192.168.1.69:3000"}
+    ).status_code == 403
+    response = client.post(
+        "/manage/micmodshop.ir/routes",
+        data={"csrf": csrf, "path": "/health",
+              "target": "192.168.1.69:3000", "proxy_uri": "/health",
+              "strip": "on", "ws": "on"}
+    )
+    assert response.status_code == 302
+    row = db.execute(
+        "SELECT * FROM routes WHERE domain='micmodshop.ir' AND path='/health'"
+    ).fetchone()
+    assert row["target"] == "192.168.1.69:3000"
+    assert row["proxy_uri"] == "/health"
+    assert row["websocket"] == 1
+    assert config_history(db, "micmodshop.ir") == []
+
+    response = client.post(
+        "/manage/micmodshop.ir/routes/delete",
+        data={"csrf": csrf, "id": row["id"], "confirm": "yes"}
+    )
+    assert response.status_code == 302
+    assert db.execute("SELECT count(*) FROM routes").fetchone()[0] == 1
+    assert config_history(db, "micmodshop.ir") == []
+
+    # Last route is protected, since an empty domain cannot render.
+    only = db.execute("SELECT id FROM routes").fetchone()[0]
+    client.post(
+        "/manage/micmodshop.ir/routes/delete",
+        data={"csrf": csrf, "id": only, "confirm": "yes"}
+    )
+    assert db.execute("SELECT count(*) FROM routes").fetchone()[0] == 1
+
+
+def test_domain_route_delete_cannot_cross_domain_boundary(app_client, db):
+    client, csrf = app_client
+    save_domain(db, "other.example.com")
+    save_route(db, "other.example.com", "/", "192.168.1.178:3001")
+    save_route(db, "other.example.com", "/api/", "192.168.1.178:3002")
+    foreign = db.execute(
+        "SELECT id FROM routes WHERE domain='other.example.com' AND path='/api/'"
+    ).fetchone()[0]
+    client.post(
+        "/manage/micmodshop.ir/routes/delete",
+        data={"csrf": csrf, "id": foreign, "confirm": "yes"}
+    )
+    assert db.execute(
+        "SELECT count(*) FROM routes WHERE domain='other.example.com'"
+    ).fetchone()[0] == 2
