@@ -4,7 +4,7 @@ on:
     paths:
       - 'controlplane/**'
       - 'requirements-controlplane.txt'
-      - 'tests/test_controlplane.py'
+      - 'tests/**'
       - '.github/workflows/controlplane-tests.yml'
   push:
     branches: ['feature/nginx-control-plane-v2']
@@ -20,4 +20,4 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-controlplane.txt
       - run: python -m compileall -q controlplane
-      - run: python -m pytest -q tests/test_controlplane.py
+      - run: python -m pytest -q tests/
