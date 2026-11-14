@@ -46,8 +46,8 @@ code{direction:ltr;display:inline-block}
 <input type="password" name="password" required autocomplete="current-password">
 <button>ورود</button></form></section>
 {% else %}
-<section class="card"><h2>دامنه‌ها</h2><table><tr><th>Domain</th><th>WWW Redirect</th><th>Body (MB)</th><th>Security</th></tr>
-{% for d in domains %}<tr><td>{{d.name}}</td><td>{{'yes' if d.redirect_www else 'no'}}</td><td>{{d.body_limit_mb}}</td><td>{{d.security_profile}}</td></tr>{% endfor %}</table>
+<section class="card"><h2>دامنه‌ها</h2><table><tr><th>Domain</th><th>Legacy flags</th><th>WWW Redirect</th><th>Body (MB)</th><th>Security</th></tr>
+{% for d in domains %}<tr><td>{{d.name}}</td><td>{{(d.first_flag ~ (' ' ~ d.second_flag if d.flag_count == 2 else '')) if d.flag_count else '—'}}</td><td>{{'yes' if d.redirect_www else 'no'}}</td><td>{{d.body_limit_mb}}</td><td>{{d.security_profile}}</td></tr>{% endfor %}</table>
 <form method="post" action="/domains" class="inline"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>دامنه <input name="name" placeholder="example.com" required></label>
 <label>حداکثر آپلود MB <input type="number" name="limit" value="50" min="1" max="500"></label>
@@ -137,7 +137,7 @@ def create_app():
         if not session.get("auth"):
             return render_template_string(HTML, csrf="")
         with open_db(db_file) as db:
-            domains = db.execute("SELECT * FROM domains ORDER BY name").fetchall()
+            domains = db.execute("""SELECT d.*, f.flag_count, f.first_flag, f.second_flag FROM domains d LEFT JOIN legacy_flags f ON f.domain=d.name ORDER BY d.name""").fetchall()
             routes = db.execute("SELECT * FROM routes ORDER BY domain,LENGTH(path) DESC,path").fetchall()
             certs = []
             for c in db.execute("SELECT * FROM certificates ORDER BY zone,kind"):
