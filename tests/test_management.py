@@ -107,7 +107,7 @@ def test_jobs_are_durable_requests_not_executions(db, tmp_path):
 def test_auth_and_csrf_cover_sensitive_admin_endpoints(app_client, db):
     client, csrf = app_client
     anonymous = create_app().test_client()
-    assert anonymous.get("/manage").status_code == 401
+    assert anonymous.get("/manage").status_code == 302
     assert anonymous.post("/manage/micmodshop.ir/generate", data={}).status_code == 401
     assert client.get("/manage").status_code == 200
     assert client.get("/manage/micmodshop.ir").status_code == 200
