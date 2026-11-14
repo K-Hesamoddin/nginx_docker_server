@@ -127,6 +127,9 @@ def main(argv=None):
     chk = subs.add_parser("audit-live", help="Compare inventory with Nginx -T via stdin (read-only)")
     chk.add_argument("--domain", required=True)
     chk.add_argument("--stdin", action="store_true", required=True)
+    batch = subs.add_parser("audit-all", help="Audit all domains from a single nginx -T snapshot")
+    batch.add_argument("--stdin", action="store_true", required=True)
+    batch.add_argument("--include-matches", action="store_true")
     apply = subs.add_parser("apply")
     apply.add_argument("--yes", action="store_true")
     apply.add_argument("--allow-replace-v1", action="store_true")
@@ -161,6 +164,13 @@ def main(argv=None):
                 report = audit_live(conn, sys.stdin.read(), args.domain)
                 print(json.dumps(report, indent=2, ensure_ascii=False))
                 if not report["routes_match"]:
+                    return 2
+            elif args.command == "audit-all":
+                import json
+                from .audit import audit_all
+                report = audit_all(conn, sys.stdin.read(), include_matches=args.include_matches)
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+                if report["drift"] or report["unverified"]:
                     return 2
             elif args.command == "preview":
                 configs = generated(conn, ssl_dir)
