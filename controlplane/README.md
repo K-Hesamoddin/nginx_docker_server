@@ -126,6 +126,24 @@ conf/auto config header was not found. Unverified hosts may be deliberately
 managed elsewhere, but require manual review. This is not complete Nginx
 semantic equivalence or a TLS validity check.
 
+## Handling the seven migration drifts
+
+Run `audit-all --stdin` against the unmodified running Nginx and inspect the
+`review_items` fields. Each entry has `requires_approval: true`; no database
+or live configuration update is made from the audit.
+
+- proxy_pass_uri_semantics: the trailing `/` of proxy_pass changes Nginx URI
+  forwarding behavior. Keep the observed configuration until tested.
+- unmanaged_live_location: a live route was not present in domains.list;
+  do not drop `/health`, `/packs`, `/widget` or `/cable` while migrating.
+- upstream_or_uri_changed: IP, port or URI differs (e.g. hibarco media,
+  vakil129). Have the service owner verify which backend is correct.
+
+The user-provided initial audit showed 22 matches and 7 drifted domains.
+Do not automatically reconcile those differences and do not use the
+`apply` or `--allow-replace-v1` commands on production. Review site-specific
+locations and security settings beyond the current simplistic parser.
+
 ## Local-only dashboard
 
 Generate a password hash using:
