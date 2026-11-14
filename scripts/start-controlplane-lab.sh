@@ -23,9 +23,22 @@ if [[ ! -f "$CONTROLPLANE_DB" ]]; then
     exit 1
 fi
 
-# The password is read by getpass, not passed as a shell literal, argument,
-# environment variable or saved file. Its salted hash stays in this process.
-PANEL_PASSWORD_HASH="$("$ROOT/.venv/bin/python" -c 'import getpass; from werkzeug.security import generate_password_hash; p=getpass.getpass("Lab admin password: "); print(generate_password_hash(p)) if len(p)>=12 else exit("Use a password of 12+ characters")')"
+# First launch: get a bootstrap admin password without exposing plaintext.
+# Subsequent launches MUST NOT silently reset the existing admin password:
+# authentication now uses persistent salted hashes from the SQLite user table.
+USER_ACCOUNTS_EXIST="$("$ROOT/.venv/bin/python" -c '
+import sqlite3, os
+conn = sqlite3.connect(os.environ["CONTROLPLANE_DB"])
+exists = conn.execute("SELECT count(*) FROM sqlite_master WHERE type=\x27table\x27 AND name=\x27panel_users\x27").fetchone()[0]
+print("yes" if exists and conn.execute("SELECT 1 FROM panel_users LIMIT 1").fetchone() else "no")
+conn.close()
+')"
+if [[ "$USER_ACCOUNTS_EXIST" == "yes" ]]; then
+    PANEL_PASSWORD_HASH="$("$ROOT/.venv/bin/python" -c 'import secrets; from werkzeug.security import generate_password_hash; print(generate_password_hash(secrets.token_urlsafe(48)))')"
+    echo "Existing admin users detected. Log in with an already configured username/password."
+else
+    PANEL_PASSWORD_HASH="$("$ROOT/.venv/bin/python" -c 'import getpass; from werkzeug.security import generate_password_hash; p=getpass.getpass("New lab admin password (12+ characters): "); print(generate_password_hash(p)) if len(p)>=12 else exit("Use a password of 12+ characters")')"
+fi
 PANEL_SECRET_KEY="$("$ROOT/.venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
 export PANEL_PASSWORD_HASH PANEL_SECRET_KEY
 
