@@ -126,3 +126,51 @@ def test_audit_requires_expected_host(tmp_path):
         audit_live(conn, DUMP, "www.micmodshop.ir")
     with pytest.raises(ValueError, match="No configuration heading"):
         audit_live(conn, DUMP.replace("/etc/nginx/conf.d/auto/micmodshop.ir.conf:", "/etc/nginx/conf.d/auto/example.com.conf:"), "micmodshop.ir")
+
+
+def test_batch_audit_all_statuses(tmp_path):
+    from controlplane.audit import audit_all
+    from controlplane.core import save_domain, save_route
+    conn = fixture_db(tmp_path)
+    save_domain(conn, "www.hibarco.com")
+    save_route(conn, "www.hibarco.com", "/", "192.168.1.112:80")
+    save_domain(conn, "other.example.com")
+    save_route(conn, "other.example.com", "/", "127.0.0.1:3000")
+    multi = DUMP.replace(
+        "# configuration file /etc/nginx/conf.d/auto/other.conf:\n"
+        "server { listen 80; }\n",
+        "# configuration file /etc/nginx/conf.d/auto/www.hibarco.com.conf:\n"
+        "server {\n  listen 443 ssl;\n  location / { proxy_pass http://192.168.1.112:80/; }\n}\n"
+    )
+    # The simplistic parser intentionally requires proxy_pass on its own line
+    # and reports a parser warning as drift, not success.
+    report = audit_all(conn, multi)
+    assert report["total"] == 3
+    assert report["matched"] == 1
+    assert report["drift"] == 1
+    assert report["unverified"] == 1
+    assert {item["domain"] for item in report["findings"]} == {
+        "www.hibarco.com", "other.example.com"
+    }
+    assert all(item["status"] != "matched" for item in report["findings"])
+
+
+def test_batch_audit_all_all_match(tmp_path):
+    from controlplane.audit import audit_all
+    conn = fixture_db(tmp_path)
+    report = audit_all(conn, DUMP)
+    assert report["total"] == 1
+    assert report["matched"] == 1
+    assert report["drift"] == report["unverified"] == 0
+    assert report["findings"] == []
+    with_all = audit_all(conn, DUMP, include_matches=True)
+    assert with_all["findings"] == [
+        {"domain": "micmodshop.ir", "status": "matched", "routes": 3}
+    ]
+
+
+def test_batch_audit_rejects_incomplete_dump(tmp_path):
+    from controlplane.audit import audit_all
+    conn = fixture_db(tmp_path)
+    with pytest.raises(ValueError, match="no config headers"):
+        audit_all(conn, "Nginx error: no data")
