@@ -58,6 +58,9 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path), timeout=10)
+    # Inventory can include private internal routes and later config snapshots.
+    # Never leave a newly created or existing DB world-readable.
+    os.chmod(path, 0o600)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA busy_timeout=10000")
@@ -320,7 +323,8 @@ def resolve_certificate(conn: sqlite3.Connection, ssl_dir: str | Path,
     return min(candidates, key=lambda x: (x[0], x[1], x[2]))[3]
 
 
-def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) -> str:
+def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str, *,
+                  allow_missing_cert: bool = False) -> str:
     domain = hostname(domain)
     d = conn.execute("SELECT * FROM domains WHERE name=? AND enabled=1", (domain,)).fetchone()
     if d is None:
@@ -332,16 +336,28 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) ->
         (f"www.{domain}",)
     ).fetchone() is not None
     names = [domain] + ([f"www.{domain}"] if d["redirect_www"] and not explicit_www else [])
-    certs = {name: resolve_certificate(conn, ssl_dir, name) for name in names}
+    certs = {}
+    pending = []
+    for name in names:
+        try:
+            certs[name] = resolve_certificate(conn, ssl_dir, name).stub
+        except ValueError:
+            if not allow_missing_cert:
+                raise
+            # Draft-only placeholder. This intentionally cannot be deployed:
+            # validation rejects PENDING-SSL, and nginx -t would fail.
+            certs[name] = f"PENDING-SSL-{name}"
+            pending.append(name)
     lines = [f"# Managed by nginx-control-plane-v2: {domain}",
+             *[f"# PENDING-SSL for {name}: certificate must be issued and draft regenerated" for name in pending],
              "server {", "    listen 80;", "    listen [::]:80;", f"    server_name {' '.join(names)};",
              f"    return 301 https://{domain}$request_uri;", "}"]
     for alias in names[1:]:
         cert = certs[alias]
         lines += ["server {", "    listen 443 ssl;", "    listen [::]:443 ssl;",
                   "    http2 on;", f"    server_name {alias};",
-                  f"    ssl_certificate /etc/nginx/ssl/{cert.stub}.crt;",
-                  f"    ssl_certificate_key /etc/nginx/ssl/{cert.stub}.key;",
+                  f"    ssl_certificate /etc/nginx/ssl/{cert}.crt;",
+                  f"    ssl_certificate_key /etc/nginx/ssl/{cert}.key;",
                   f"    return 301 https://{domain}$request_uri;", "}"]
     cert = certs[domain]
     lines += ["server {", "    listen 443 ssl;", "    listen [::]:443 ssl;",
