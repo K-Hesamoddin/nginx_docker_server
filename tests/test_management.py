@@ -81,6 +81,13 @@ def test_snapshot_existing_live_config_never_becomes_deployed(db):
 
 def test_jobs_are_durable_requests_not_executions(db, tmp_path):
     rev = generate_revision(db, tmp_path / "ssl", "micmodshop.ir")
+    with pytest.raises(ValueError, match="SSL"):
+        queue_deployment(db, "micmodshop.ir", rev)
+    body = load_version(db, "micmodshop.ir", rev)["body"]
+    reviewed = body.replace("PENDING-SSL-", "verified-test-cert-")
+    # The queue does not run deployment; the eventual privileged worker must
+    # verify certificate files and server ownership again before execution.
+    rev = store_version(db, "micmodshop.ir", reviewed, "manual", "reviewed")
     job = queue_deployment(db, "micmodshop.ir", rev)
     record = db.execute("SELECT * FROM operator_jobs WHERE id=?", (job,)).fetchone()
     assert record["status"] == "pending"
@@ -136,6 +143,10 @@ def test_admin_explicit_requests_never_call_docker(app_client, db):
     client, csrf = app_client
     draft = generate_revision(db, __import__("pathlib").Path("/nonexistent/ssl"),
                               "micmodshop.ir")
+    body = load_version(db, "micmodshop.ir", draft)["body"]
+    draft = store_version(db, "micmodshop.ir",
+                          body.replace("PENDING-SSL-", "verified-test-cert-"),
+                          "manual", "reviewed")
     response = client.post(
         "/manage/micmodshop.ir/request-deploy",
         data={"csrf": csrf, "version": draft, "confirm": "yes"},
@@ -152,3 +163,39 @@ def test_admin_explicit_requests_never_call_docker(app_client, db):
     assert db.execute(
         "SELECT deployed_version_id FROM config_heads WHERE domain='micmodshop.ir'"
     ).fetchone()[0] is None
+
+
+def test_explicit_proxy_uri_preserves_custom_legacy_rewrite(db, tmp_path):
+    from controlplane.core import render_config
+    from controlplane.audit import audit_live
+    save_route(db, "micmodshop.ir", "/health", "192.168.1.69:3000",
+               strip_prefix=False, proxy_uri="/health")
+    body = render_config(db, tmp_path / "ssl", "micmodshop.ir",
+                         allow_missing_cert=True)
+    assert "location /health {" in body
+    assert "proxy_pass http://192.168.1.69:3000/health;" in body
+    with pytest.raises(ValueError, match="Invalid route path"):
+        save_route(db, "micmodshop.ir", "/health", "192.168.1.69:3000",
+                   proxy_uri="/../../etc/passwd")
+
+
+def test_origin_tls_probe_rejects_invalid_name_without_connecting():
+    from controlplane.tls_probe import probe_local_tls
+    with pytest.raises(ValueError, match="Invalid hostname"):
+        probe_local_tls("bad\nserver")
+
+
+def test_admin_tls_status_is_on_demand(app_client, db, monkeypatch):
+    client, csrf = app_client
+    called = []
+    def fake_probe(name):
+        called.append(name)
+        return {"status": "valid", "expires": "2027-01-01", "issuer": "Test",
+                "reason": "valid", "matches_hostname": True}
+    monkeypatch.setattr("controlplane.tls_probe.probe_local_tls", fake_probe)
+    assert client.get("/manage/micmodshop.ir").status_code == 200
+    assert called == []
+    r = client.get("/manage/micmodshop.ir?tls=1")
+    assert r.status_code == 200
+    assert b"2027-01-01" in r.data
+    assert called == ["micmodshop.ir"]
