@@ -334,29 +334,34 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) ->
     names = [domain] + ([f"www.{domain}"] if d["redirect_www"] and not explicit_www else [])
     certs = {name: resolve_certificate(conn, ssl_dir, name) for name in names}
     lines = [f"# Managed by nginx-control-plane-v2: {domain}",
-             "server {", "    listen 80;", f"    server_name {' '.join(names)};",
+             "server {", "    listen 80;", "    listen [::]:80;", f"    server_name {' '.join(names)};",
              f"    return 301 https://{domain}$request_uri;", "}"]
     for alias in names[1:]:
         cert = certs[alias]
-        lines += ["server {", "    listen 443 ssl;",
-                  f"    server_name {alias};",
+        lines += ["server {", "    listen 443 ssl;", "    listen [::]:443 ssl;",
+                  "    http2 on;", f"    server_name {alias};",
                   f"    ssl_certificate /etc/nginx/ssl/{cert.stub}.crt;",
                   f"    ssl_certificate_key /etc/nginx/ssl/{cert.stub}.key;",
                   f"    return 301 https://{domain}$request_uri;", "}"]
     cert = certs[domain]
-    lines += ["server {", "    listen 443 ssl;",
-              f"    server_name {domain};",
+    lines += ["server {", "    listen 443 ssl;", "    listen [::]:443 ssl;",
+              "    http2 on;", f"    server_name {domain};",
               f"    ssl_certificate /etc/nginx/ssl/{cert.stub}.crt;",
               f"    ssl_certificate_key /etc/nginx/ssl/{cert.stub}.key;",
               f"    client_max_body_size {d['body_limit_mb']}m;",
               "    server_tokens off;"]
     if d["security_profile"] == "legacy":
-        lines.append("    include /etc/nginx/conf.d/includes/security.conf;")
+        lines += [
+            "    include /etc/nginx/conf.d/includes/security.conf;",
+            "    include /etc/nginx/conf.d/buffer.conf;",
+            "    access_log off;",
+            f"    error_log logs/{domain}.error.log warn;",
+        ]
     else:
         lines += ["    ssl_protocols TLSv1.2 TLSv1.3;",
                   "    add_header X-Content-Type-Options nosniff always;",
                   "    add_header Referrer-Policy strict-origin-when-cross-origin always;"]
-    routes = conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY LENGTH(path) DESC, path",
+    routes = conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY id",
                           (domain,)).fetchall()
     if not routes:
         raise ValueError(f"No backend routes configured for {domain}")
@@ -368,14 +373,21 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) ->
         destination = f"http://{target}" + ("/" if r["strip_prefix"] else "")
         lines += [f"    location {path} {{",
                   f"        proxy_pass {destination};",
-                  "        proxy_http_version 1.1;",
-                  "        proxy_set_header Host $host;",
-                  "        proxy_set_header X-Real-IP $remote_addr;",
-                  "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-                  "        proxy_set_header X-Forwarded-Proto $scheme;"]
-        if r["websocket"]:
+                  "        proxy_http_version 1.1;"]
+        # Legacy config forwards Upgrade and Connection unconditionally for
+        # every location. Preserve it in parity mode; new profiles can opt in.
+        if d["security_profile"] == "legacy" or r["websocket"]:
             lines += ["        proxy_set_header Upgrade $http_upgrade;",
                       "        proxy_set_header Connection \"upgrade\";"]
+        lines += [
+            "        proxy_set_header Host $host;",
+            "        proxy_set_header X-Real-IP $remote_addr;",
+            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+            "        proxy_set_header X-Forwarded-Proto $scheme;",
+        ]
+        if d["security_profile"] == "legacy":
+            lines += ["        proxy_set_header X-Forwarded-Host $host;",
+                      "        proxy_set_header X-Forwarded-Server $host;"]
         lines += ["    }"]
     lines += ["}", ""]
     return "\n".join(lines)
