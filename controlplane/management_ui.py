@@ -26,22 +26,39 @@ PAGE = """
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Nginx V2 | نسخه‌ها و عملیات</title>
 <style>
-body{font:15px/1.8 system-ui;background:#f5f6f9;color:#172239;margin:0}
-main{max-width:1280px;margin:20px auto;padding:0 18px}
-header,section{background:white;border:1px solid #dae1e9;border-radius:12px;padding:18px;margin-bottom:16px}
-h1{font-size:22px}h2{font-size:18px}a{color:#124a82}small{color:#667085}
-table{width:100%;border-collapse:collapse;direction:ltr;text-align:left}
-th,td{padding:8px;border-bottom:1px solid #e4e9ef}
-textarea{width:100%;min-height:400px;box-sizing:border-box;direction:ltr;text-align:left;font:12px/1.45 monospace}
-button,input,select{padding:9px;border-radius:6px;border:1px solid #b7c3d5}
-button{background:#174d7e;color:white;cursor:pointer}
-label{display:inline-block;margin:8px}
-pre{direction:ltr;text-align:left;white-space:pre-wrap;overflow:auto;background:#f0f3f7;padding:12px;border-radius:8px}
-.notice{background:#fff8eb;border:1px solid #ead7b1;padding:12px;border-radius:8px}
+*{box-sizing:border-box}
+body{font:15px/1.8 system-ui;background:#f4f6fb;color:#182640;margin:0}
+main{max-width:1380px;margin:20px auto;padding:0 16px}
+header,section{background:white;border:1px solid #dce5ef;border-radius:14px;padding:20px;margin-bottom:15px;box-shadow:0 2px 9px rgba(20,38,66,.035)}
+header{background:#142e4b;color:#fff}header a{color:#cce8ff}
+h1{font-size:23px;margin:0 0 8px}h2{font-size:18px;margin:0 0 9px}
+a{color:#16558e;text-decoration:none}a:hover{text-decoration:underline}
+small{color:#64758b}
+table{width:100%;border-collapse:collapse;direction:ltr;text-align:left;font-size:13px}
+th,td{padding:9px;border-bottom:1px solid #e4e9f0;vertical-align:top}
+.tablewrap{overflow:auto}
+textarea{width:100%;min-height:360px;box-sizing:border-box;direction:ltr;text-align:left;font:13px/1.5 monospace}
+button,input,select{padding:9px;border-radius:8px;border:1px solid #b7c3d5;background:#fff;max-width:100%}
+button{background:#174d7e;color:white;border:0;cursor:pointer}
+label{display:inline-flex;gap:8px;align-items:center;margin:8px;flex-wrap:wrap}
+pre{direction:ltr;text-align:left;white-space:pre-wrap;overflow:auto;word-break:break-word;background:#eef4f9;padding:12px;border-radius:8px}
+.notice{background:#fff8eb;color:#674d20;padding:11px;border-radius:8px;border:1px solid #ead7b1}
 .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(255px,1fr));gap:13px}
+.tile{background:#f7fafe;border:1px solid #dce7f2;border-radius:12px;padding:15px}
+.tile strong{font-size:16px;direction:ltr;display:block}
+.meta{color:#5d6b81;font-size:12px}
+.search{display:flex;gap:10px;align-items:center}
+.search input{min-width:240px;flex:1}
+nav{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:10px}
+@media(max-width:720px){main{padding:8px}header,section{padding:13px}.search{flex-wrap:wrap}}
 </style></head><body><main>
 <header><h1>Nginx Control Plane V2 — مدیریت نسخه‌ها</h1>
-<div><a href="/">پنل دامنه‌ها و Routeها</a> | <a href="/manage">نسخه‌ها و درخواست‌ها</a></div>
+<nav><a href="/admin">نمای کلی</a><a href="/manage">دامنه‌ها</a>
+<a href="/admin/ssl">SSL یکپارچه</a><a href="/admin/includes">امنیت و Include</a>
+<a href="/admin/streams">Stream</a>{% if session.get('role')=='admin' %}
+<a href="/admin/users">کاربران</a><a href="/admin/access">IPهای مجاز</a>{% endif %}
+<a href="/">پنل اولیه</a></nav>
 <p class="notice">محیط آزمایشی: دکمه درخواست انتشار یا SSL فقط یک کار در صف ثبت می‌کند.
 هنوز هیچ سرویس اجرایی مجاز به تغییر Nginx یا صدور واقعی گواهی از این پنل متصل نشده است.</p>
 </header>
@@ -49,15 +66,24 @@ pre{direction:ltr;text-align:left;white-space:pre-wrap;overflow:auto;background:
 <section><strong>{{message}}</strong></section>
 {% endfor %}
 {% if mode == "index" %}
-<section><h2>دامنه‌ها</h2>
-<table><tr><th>Domain</th><th>Routes</th><th>Protected V1 flag</th><th>Draft version</th><th>V2 deployed</th><th>SSL inventory</th></tr>
+<section><h2>دامنه‌ها و نسخه‌های کانفیگ</h2>
+<form method="get" action="/manage" class="search">
+<input type="search" name="q" value="{{q}}" placeholder="جست‌وجوی دامنه؛ مثل cloud یا micromodern">
+<button>جست‌وجو</button>
+{% if q %}<a href="/manage">نمایش همه</a>{% endif %}
+</form>
+<p class="meta">{{domains|length}} دامنه نمایش داده شده. فلگ‌های قدیمی فقط داده تاریخی‌اند؛
+تغییر Routeها بدون زدن دکمه ساخت نسخه، کانفیگ را بازنویسی نمی‌کند.</p>
+<div class="cards">
 {% for item in domains %}
-<tr><td><a href="{{url_for('manager.detail', domain=item.name)}}">{{item.name}}</a></td>
-<td>{{item.routes}}</td><td>{{item.flag if item.flag is not none else '—'}}</td>
-<td>{{item.draft if item.draft else '—'}}</td>
-<td>{{item.deployed if item.deployed else 'Not deployed by V2'}}</td>
-<td>{{item.ssl}}</td></tr>
-{% endfor %}</table></section>
+<div class="tile"><strong><a href="{{url_for('manager.detail', domain=item.name)}}">{{item.name}}</a></strong>
+<div class="meta">{{item.routes}} Route · V1 flag: {{item.flag if item.flag is not none else '—'}}</div>
+<div class="meta">Draft: {{item.draft if item.draft else 'ندارد'}} ·
+V2 deployed: {{item.deployed if item.deployed else 'خیر'}}</div>
+<div class="meta">SSL: {{item.ssl}}</div>
+<a href="{{url_for('manager.detail',domain=item.name)}}">مدیریت این دامنه</a>
+</div>{% endfor %}
+</div></section>
 <section><h2>صف عملیات</h2>
 <table><tr><th>#</th><th>Time UTC</th><th>Action</th><th>Domain/Zone</th><th>Version</th><th>Status</th><th>Result</th></tr>
 {% for job in jobs %}<tr><td>{{job.id}}</td><td>{{job.requested_at}}</td><td>{{job.kind}}</td><td>{{job.domain}}</td>
@@ -175,6 +201,7 @@ def cert_status(conn, domain: str) -> str:
 
 @bp.get("/manage")
 def index():
+    q = (request.args.get("q") or "").strip().lower()[:100]
     with open_db(db_path()) as conn:
         ensure_schema(conn)
         rows = conn.execute(
@@ -188,12 +215,12 @@ def index():
             dict(name=r["name"], flag=r["first_flag"], draft=r["draft_version_id"],
                  deployed=r["deployed_version_id"], routes=r["routes"],
                  ssl=cert_status(conn, r["name"]))
-            for r in rows
+            for r in rows if not q or q in r["name"]
         ]
         jobs = conn.execute(
             "SELECT * FROM operator_jobs ORDER BY id DESC LIMIT 100"
         ).fetchall()
-    return render_template_string(PAGE, mode="index", domains=domains, jobs=jobs)
+    return render_template_string(PAGE, mode="index", domains=domains, jobs=jobs, q=q)
 
 
 @bp.get("/manage/<domain>")
