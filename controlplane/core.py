@@ -16,7 +16,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.x509.oid import ExtensionOID
 
 HOST_RE = re.compile(r"(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+\Z")
-PATH_RE = re.compile(r"/(?:[a-zA-Z0-9_.~!$&'()*+,;=:@%/-]*)\Z")
+PATH_RE = re.compile(r"/[a-zA-Z0-9_./~-]*\Z")
 STUB_RE = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}\Z")
 
 
@@ -274,8 +274,11 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str) ->
         lines += ["    ssl_protocols TLSv1.2 TLSv1.3;",
                   "    add_header X-Content-Type-Options nosniff always;",
                   "    add_header Referrer-Policy strict-origin-when-cross-origin always;"]
-    for r in conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY LENGTH(path) DESC, path",
-                          (domain,)):
+    routes = conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY LENGTH(path) DESC, path",
+                          (domain,)).fetchall()
+    if not routes:
+        raise ValueError(f"No backend routes configured for {domain}")
+    for r in routes:
         target, path = r["target"], r["path"]
         # Validate again at the rendering boundary.
         upstream(target)
