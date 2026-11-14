@@ -66,6 +66,13 @@ pre{direction:ltr;text-align:left;white-space:pre-wrap;overflow:auto;background:
 {% else %}
 <section><h2>{{domain}}</h2>
 <p>SSL در دیتابیس V2: <strong>{{ssl}}</strong>. این وضعیت جای بررسی TLS زنده و ثبت گواهی‌های قدیمی را نمی‌گیرد.</p>
+<p><a href="{{url_for('manager.detail',domain=domain,tls=1)}}">بررسی گواهی TLS واقعی از طریق 127.0.0.1:443 با SNI</a></p>
+{% if tls_result %}<p><strong>Origin TLS:</strong> {{tls_result.status}} |
+Expiry: {{tls_result.expires or 'unknown'}} |
+SNI match: {{tls_result.matches_hostname}} |
+Issuer: {{tls_result.issuer or 'unknown'}} |
+Reason: {{tls_result.reason}}</p>
+<p><small>این تست فقط Nginx محلی را بررسی می‌کند، نه اتصال عمومی یا لبه CDN.</small></p>{% endif %}
 <p>نسخه پیش‌نویس: {{head.draft_version_id if head else 'ندارد'}} |
 منتشرشده توسط V2: {{head.deployed_version_id if head and head.deployed_version_id else 'هیچ نسخه‌ای'}}.</p>
 <h2>Routeهای تعریف‌شده</h2>
@@ -186,10 +193,14 @@ def detail(domain):
             "SELECT * FROM routes WHERE domain=? ORDER BY id", (domain,)
         ).fetchall()
         ssl = cert_status(conn, domain)
+    tls_result = None
+    if request.args.get("tls") == "1":
+        from .tls_probe import probe_local_tls
+        tls_result = probe_local_tls(domain)
     return render_template_string(
         PAGE, mode="detail", domain=domain, csrf=session["csrf"],
         selected=selected, versions=versions, head=head, routes=routes,
-        ssl=ssl, diff=diff,
+        ssl=ssl, diff=diff, tls_result=tls_result,
     )
 
 
