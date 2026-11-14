@@ -69,8 +69,8 @@ pre{direction:ltr;text-align:left;white-space:pre-wrap;overflow:auto;background:
 <p>نسخه پیش‌نویس: {{head.draft_version_id if head else 'ندارد'}} |
 منتشرشده توسط V2: {{head.deployed_version_id if head and head.deployed_version_id else 'هیچ نسخه‌ای'}}.</p>
 <h2>Routeهای تعریف‌شده</h2>
-<table><tr><th>Path</th><th>Upstream</th><th>Strip prefix</th><th>WebSocket</th></tr>
-{% for r in routes %}<tr><td>{{r.path}}</td><td>{{r.target}}</td><td>{{r.strip_prefix}}</td><td>{{r.websocket}}</td></tr>{% endfor %}</table>
+<table><tr><th>Path</th><th>Upstream</th><th>Proxy URI</th><th>Strip prefix</th><th>WebSocket</th></tr>
+{% for r in routes %}<tr><td>{{r.path}}</td><td>{{r.target}}</td><td>{{r.proxy_uri if r.proxy_uri is not none else 'default'}}</td><td>{{r.strip_prefix}}</td><td>{{r.websocket}}</td></tr>{% endfor %}</table>
 <p>برای افزودن یا تغییر Route از <a href="/">فرم دامنه‌ها و Routeها</a> استفاده کن.
 تغییر Routeها به‌تنهایی هیچ فایل کانفیگی نمی‌سازد.</p>
 <form method="post" action="{{url_for('manager.generate',domain=domain)}}">
