@@ -217,19 +217,43 @@ def remove_allowed_net(conn: sqlite3.Connection, cidr: str, actor: str):
         audit(conn, "acl-delete", f"{actor}: {value}")
 
 
+def known_inventory_hosts(conn: sqlite3.Connection) -> set[str]:
+    """Collect validated names from inventory and archived live server_name.
+
+    Nginx aliases are discovery evidence, not automatically deployable routes.
+    Wildcard/regex/catch-all server names are intentionally not treated as
+    literal hostnames.
+    """
+    hosts = {row["name"] for row in conn.execute("SELECT name FROM domains")}
+    hosts.update(
+        "www." + row["name"] for row in
+        conn.execute("SELECT name FROM domains WHERE redirect_www=1")
+    )
+    has_history = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='config_versions'"
+    ).fetchone() is not None
+    if has_history:
+        for row in conn.execute(
+            "SELECT body FROM config_versions WHERE origin='live_snapshot'"
+        ):
+            for match in re.finditer(r"(?m)^\s*server_name\s+([^;\r\n]+);",
+                                     row["body"]):
+                for value in match.group(1).split():
+                    try:
+                        hosts.add(hostname(value))
+                    except ValueError:
+                        continue
+    return hosts
+
+
 def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
     """Conservative suggestions for known .ir and .com suffixes only.
 
     Registered-domain boundaries must be verified by the operator/DNS provider.
     No attempts to issue or infer NSIN authority are made here.
     """
-    domains = [row["name"] for row in conn.execute("SELECT name FROM domains")]
-    redirect_www = {
-        row["name"] for row in
-        conn.execute("SELECT name FROM domains WHERE redirect_www=1")
-    }
-    names = set(domains)
-    names.update("www." + d for d in redirect_www)
+    # Include manually edited live server_name aliases in the coverage plan.
+    names = known_inventory_hosts(conn)
     groups: dict[str, set[str]] = {}
     for domain in names:
         labels = domain.split(".")
