@@ -55,14 +55,15 @@ code{direction:ltr;display:inline-block}
 <label>امنیت <select name="security"><option value="legacy">legacy</option><option value="baseline">baseline</option></select></label>
 <label><input type="checkbox" name="www" value="1"> ریدایرکت www</label><button>ثبت / ویرایش</button></form></section>
 <section class="card"><h2>مسیرها و Upstreamها</h2>
-<table><tr><th>Domain</th><th>Location</th><th>Target</th><th>Strip prefix</th><th>WebSocket</th><th></th></tr>
+<table><tr><th>Domain</th><th>Location</th><th>Target</th><th>Proxy URI override</th><th>Strip prefix</th><th>WebSocket</th><th></th></tr>
 {% for r in routes %}<tr><td>{{r.domain}}</td><td>{{r.path}}</td><td>{{r.target}}</td>
-<td>{{r.strip_prefix}}</td><td>{{r.websocket}}</td><td><form method="post" action="/routes/delete">
+<td>{{r.proxy_uri if r.proxy_uri is not none else '—'}}</td><td>{{r.strip_prefix}}</td><td>{{r.websocket}}</td><td><form method="post" action="/routes/delete">
 <input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="id" value="{{r.id}}"><button>حذف</button></form></td></tr>{% endfor %}</table>
 <form method="post" action="/routes" class="inline"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>دامنه <select name="domain">{% for d in domains %}<option>{{d.name}}</option>{% endfor %}</select></label>
 <label>Path <input name="path" value="/" required></label>
 <label>Upstream <input name="target" placeholder="192.168.1.178:3000" required></label>
+<label>Proxy URI اختیاری <input name="proxy_uri" placeholder="/health"></label>
 <label><input type="checkbox" name="strip" checked> حذف prefix</label>
 <label><input type="checkbox" name="ws"> WebSocket</label><button>ثبت مسیر</button></form></section>
 <section class="card"><h2>گواهی‌ها</h2>
@@ -168,7 +169,8 @@ def create_app():
         try:
             with open_db(db_file) as db:
                 save_route(db, request.form["domain"], request.form["path"], request.form["target"],
-                           request.form.get("strip") == "on", request.form.get("ws") == "on")
+                           request.form.get("strip") == "on", request.form.get("ws") == "on",
+                           request.form.get("proxy_uri") or None)
             flash("مسیر ذخیره شد", "ok")
         except (ValueError, KeyError) as exc:
             flash(str(exc), "error")
