@@ -47,9 +47,16 @@ def apply_config(conn, root, ssl_dir, allow_replace_v1=False):
     lock_file.parent.mkdir(parents=True, exist_ok=True)
     with lock_file.open("a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        # Preflight *all* managed paths before writing the first file.
+        if not allow_replace_v1:
+            for name in configs:
+                candidate = out / name
+                if candidate.exists() and "Managed by nginx-control-plane-v2:" not in candidate.read_text():
+                    raise ValueError(f"Unmanaged configuration: {candidate}; migration approval required")
         # Keep backups present until validation and any necessary rollback finish.
         backup_dir = Path(tempfile.mkdtemp(prefix=".controlplane-backup-", dir=root))
         backups = {}
+        changed = []
         try:
             for name, content in configs.items():
                 target = out / name
@@ -68,6 +75,7 @@ def apply_config(conn, root, ssl_dir, allow_replace_v1=False):
                     staging.write_text(content)
                     os.chmod(staging, 0o644)
                     os.replace(staging, target)
+                    changed.append(target)
                 finally:
                     staging.unlink(missing_ok=True)
             run("docker", "exec", "nginx-proxy", "nginx", "-t")
@@ -75,16 +83,17 @@ def apply_config(conn, root, ssl_dir, allow_replace_v1=False):
             audit(conn, "deploy", f"{len(configs)} configs")
             conn.commit()
         except Exception:
-            for target, old in backups.items():
-                if old is not None and old.exists():
-                    shutil.copy2(old, target)
-                elif old is None:
-                    target.unlink(missing_ok=True)
-            try:
-                run("docker", "exec", "nginx-proxy", "nginx", "-t")
-                run("docker", "exec", "nginx-proxy", "nginx", "-s", "reload")
-            except Exception:
-                print("CRITICAL: rollback/reload failed; manual intervention required!", file=sys.stderr)
+            if changed:
+                for target, old in backups.items():
+                    if old is not None and old.exists():
+                        shutil.copy2(old, target)
+                    elif old is None:
+                        target.unlink(missing_ok=True)
+                try:
+                    run("docker", "exec", "nginx-proxy", "nginx", "-t")
+                    run("docker", "exec", "nginx-proxy", "nginx", "-s", "reload")
+                except Exception:
+                    print("CRITICAL: rollback/reload failed; manual intervention required!", file=sys.stderr)
             raise
         finally:
             shutil.rmtree(backup_dir, ignore_errors=True)
