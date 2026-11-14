@@ -124,6 +124,9 @@ def main(argv=None):
     imp = subs.add_parser("import-legacy"); imp.add_argument("--file", default="domains.list")
     exp = subs.add_parser("export-legacy"); exp.add_argument("--file")
     prev = subs.add_parser("preview"); prev.add_argument("--domain")
+    chk = subs.add_parser("audit-live", help="Compare inventory with Nginx -T via stdin (read-only)")
+    chk.add_argument("--domain", required=True)
+    chk.add_argument("--stdin", action="store_true", required=True)
     apply = subs.add_parser("apply")
     apply.add_argument("--yes", action="store_true")
     apply.add_argument("--allow-replace-v1", action="store_true")
@@ -152,6 +155,13 @@ def main(argv=None):
                     (root / args.file).write_text(data)
                 else:
                     print(data, end="")
+            elif args.command == "audit-live":
+                import json
+                from .audit import audit_live
+                report = audit_live(conn, sys.stdin.read(), args.domain)
+                print(json.dumps(report, indent=2, ensure_ascii=False))
+                if not report["routes_match"]:
+                    return 2
             elif args.command == "preview":
                 configs = generated(conn, ssl_dir)
                 for name, text in configs.items():
