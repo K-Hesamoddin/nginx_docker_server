@@ -90,6 +90,9 @@ def test_users_admin_editor_viewer_and_deactivate_revokes_session(db, login):
         "csrf": csrf, "id": editor["id"], "role": "editor", "active": "0"
     }).status_code == 302
     assert editor_client.get("/admin").status_code == 401
+    home = editor_client.get("/")
+    assert home.status_code == 200
+    assert b"micmodshop.ir" not in home.data  # revoked session must see login only
 
     with pytest.raises(ValueError, match="own admin"):
         user_update(db, 1, 1, "viewer", True)
