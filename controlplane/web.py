@@ -34,7 +34,8 @@ button{background:#1c4375;color:white;border:0;border-radius:7px;padding:9px 15p
 form{margin:12px 0}.error{color:#9f2020}.note{background:#f3f7ff;padding:9px;border-radius:6px}
 code{direction:ltr;display:inline-block}
 </style></head><body><main>
-<header><div><h1>Nginx Control Plane V2</h1><small>داشبورد داخلی | تغییرات ابتدا در دیتابیس ثبت می‌شوند و خودکار Deploy نمی‌شوند</small></div>
+<header><div><h1>Nginx Control Plane V2</h1><small>داشبورد داخلی | تغییرات ابتدا در دیتابیس ثبت می‌شوند و خودکار Deploy نمی‌شوند</small>
+{% if session.get('auth') %}<p><a href="/manage">مدیریت کانفیگ، نسخه‌ها، دیف‌ها و درخواست SSL</a></p>{% endif %}</div>
 {% if session.get('auth') %}
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{csrf}}"><button>خروج</button></form>
 {% endif %}</header>
@@ -93,7 +94,7 @@ def create_app():
     app = Flask(__name__)
     app.secret_key = secret
     app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Strict",
-                      MAX_CONTENT_LENGTH=16 * 1024)
+                      MAX_CONTENT_LENGTH=256 * 1024)
     db_file = Path(os.environ.get("CONTROLPLANE_DB", "data/controlplane.sqlite3"))
     ssl_dir = Path(os.environ.get("SSL_DIR", "ssl"))
 
@@ -192,4 +193,6 @@ def create_app():
             flash(str(exc), "error")
         return redirect(url_for("index"))
 
+    from .management_ui import bp as management_bp
+    app.register_blueprint(management_bp)
     return app
