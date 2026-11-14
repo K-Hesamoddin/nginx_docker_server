@@ -191,9 +191,10 @@ def queue_certificate(conn: sqlite3.Connection, zone: str, kind: str) -> int:
     zone = hostname(zone)
     if kind not in {"dedicated", "wildcard"}:
         raise ValueError("Certificate kind must be dedicated or wildcard")
-    existing = {
-        row["name"] for row in conn.execute("SELECT name FROM domains")
-    }
+    # A host explicitly present in an archived live server_name also counts as
+    # an operator-known alias. The job is only queued, never issued here.
+    from .admin_features import known_inventory_hosts
+    existing = known_inventory_hosts(conn)
     if kind == "dedicated":
         alias = zone.startswith("www.") and zone[4:] in existing
         if zone not in existing and not alias:
