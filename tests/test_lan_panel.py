@@ -78,6 +78,18 @@ def test_lan_scripts_are_valid_bash_and_not_docker_commands():
         assert "docker compose" not in content
         assert "systemctl restart nginx" not in content
 
+    # User-owned systemd lacks CAP_SETPCAP on this host; these sandbox
+    # options caused 218/CAPABILITIES and repeated restart loops.
+    installer = (root / "scripts" / "install-controlplane-lan.sh").read_text()
+    unit = installer.split('cat > "$UNIT" <<EOF', 1)[1].split("\nEOF", 1)[0]
+    assert "CapabilityBoundingSet=" not in unit
+    assert "PrivateTmp=" not in unit
+    assert "RestrictSUIDSGID=" not in unit
+    assert "NoNewPrivileges=yes" in unit
+    assert "systemctl --user restart nginx-controlplane-v2.service" in installer
+    assert "systemctl --user is-active --quiet" in installer
+    assert "ss -ltn" in installer
+
     runner = (root / "scripts" / "start-controlplane-lan.sh").read_text()
     assert '--certfile "$ROOT/data/panel-lan/server.crt"' in runner
     assert '--bind "${PANEL_LAN_IP}:8787"' in runner
