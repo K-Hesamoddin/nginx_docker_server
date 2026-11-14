@@ -122,5 +122,7 @@ def test_legacy_renderer_parity(tmp_path, monkeypatch):
 
 def test_audit_requires_expected_host(tmp_path):
     conn = fixture_db(tmp_path)
-    with pytest.raises(ValueError, match="No configuration heading"):
+    with pytest.raises(ValueError, match="No domain in inventory"):
         audit_live(conn, DUMP, "www.micmodshop.ir")
+    with pytest.raises(ValueError, match="No configuration heading"):
+        audit_live(conn, DUMP.replace("/etc/nginx/conf.d/auto/micmodshop.ir.conf:", "/etc/nginx/conf.d/auto/example.com.conf:"), "micmodshop.ir")
