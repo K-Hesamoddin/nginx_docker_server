@@ -90,55 +90,22 @@ def apply_config(conn, root, ssl_dir, allow_replace_v1=False):
             shutil.rmtree(backup_dir, ignore_errors=True)
 
 
-def issue_wildcard(conn, ssl_dir, zone, acme_bin):
-    """DNS-01 issuance is explicit, never a silent fallback to self-signed.
-
-    Certificates are copied into immutable fingerprinted filenames, not into
-    Nginx's active paths. Registration does not modify any live server.
-    """
+def issue_wildcard(conn, root, db_file, ssl_dir, zone, acme_bin):
+    """DNS-01 wildcard, with a persistent acme.sh renewal/install hook."""
+    from .renewal import configure_renewal_hook, has_valid_wildcard
     zone = hostname(zone)
-    if not os.environ.get("NSIN_Api_Key"):
-        raise ValueError("NSIN_Api_Key not present in environment (never commit it)")
     if not shutil.which(acme_bin):
-        raise ValueError(f"acme.sh executable not found: {acme_bin}")
-    ssl_dir.mkdir(parents=True, exist_ok=True)
-    # acme.sh --install-cert stores renewal target paths. Use a *persistent* staging
-    # directory instead of TemporaryDirectory, so later acme.sh renewals do not
-    # target deleted files.
-    staging = ssl_dir / ".acme" / zone
-    staging.mkdir(parents=True, exist_ok=True, mode=0o700)
-    crt, key = staging / "fullchain.pem", staging / "privkey.pem"
-    run(acme_bin, "--issue", "--server", "letsencrypt", "--dns", "dns_nsin",
-        "--keylength", "ec-256", "-d", zone, "-d", f"*.{zone}")
-    run(acme_bin, "--install-cert", "-d", zone, "--ecc",
-        "--fullchain-file", str(crt), "--key-file", str(key))
-    # Inspect both actual SAN coverage and private-key match before publishing.
-    from cryptography import x509
-    from cryptography.hazmat.primitives import serialization
-    cert = x509.load_pem_x509_certificate(crt.read_bytes())
-    public_key = serialization.load_pem_private_key(key.read_bytes(), password=None).public_key()
-    if cert.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo) != \
-       public_key.public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo):
-        raise ValueError("ACME certificate/private key mismatch")
-    names = set(cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName))
-    if not {zone, f"*.{zone}"}.issubset(names):
-        raise ValueError(f"ACME certificate SAN mismatch: {names}")
-    if cert.not_valid_after_utc.timestamp() < __import__("time").time() + 14 * 86400:
-        raise ValueError("ACME certificate expires in less than 14 days")
-    fingerprint = hashlib.sha256(crt.read_bytes()).hexdigest()[:16]
-    stub = f"wildcard.{zone}.{fingerprint}"
-    # New immutable file names guarantee no active cert is overwritten by issuance.
-    dest_crt, dest_key = ssl_dir / (stub + ".crt"), ssl_dir / (stub + ".key")
-    if not dest_crt.exists():
-        for src, dest, mode in ((crt, dest_crt, 0o644), (key, dest_key, 0o600)):
-            with dest.open("xb") as output:
-                output.write(src.read_bytes())
-            os.chmod(dest, mode)
-    inspect_certificate(ssl_dir, stub)
-    save_certificate(conn, zone, "wildcard", stub)
-    print(f"Registered {stub}. No Nginx config was deployed.")
-    print("Note: ACME renewal staging files do NOT auto-promote to immutable live files.")
-    print("Re-run issue-wildcard and deploy after renewal, until a verified renewal hook is configured.")
+        raise ValueError(f"acme.sh not installed: {acme_bin}")
+    if not has_valid_wildcard(conn, ssl_dir, zone, min_days=30):
+        if not os.environ.get("NSIN_Api_Key"):
+            raise ValueError("NSIN_Api_Key missing; configure it securely in the acme.sh account")
+        run(acme_bin, "--issue", "--server", "letsencrypt", "--dns", "dns_nsin",
+            "--keylength", "ec-256", "-d", zone, "-d", f"*.{zone}")
+    else:
+        print(f"Valid wildcard already registered for {zone}; no new issuance requested.")
+    configure_renewal_hook(root, db_file, ssl_dir, zone, acme_bin)
+    print("ACME renewal hook configured. Live Nginx is unchanged unless the explicit")
+    print("root-owned data/enable-auto-deploy marker is enabled and all configs are V2-managed.")
 
 
 def main(argv=None):
@@ -154,6 +121,11 @@ def main(argv=None):
     issue = subs.add_parser("issue-wildcard")
     issue.add_argument("zone")
     issue.add_argument("--acme-bin", default="acme.sh")
+    hook = subs.add_parser("configure-renewal-hook")
+    hook.add_argument("zone")
+    hook.add_argument("--acme-bin", default="acme.sh")
+    sync = subs.add_parser("sync-renewed")
+    sync.add_argument("zone")
     args = parser.parse_args(argv)
     root, db_file, ssl_dir = paths()
     try:
@@ -181,7 +153,14 @@ def main(argv=None):
                     parser.error("apply requires --yes after preview and backups")
                 apply_config(conn, root, ssl_dir, args.allow_replace_v1)
             elif args.command == "issue-wildcard":
-                issue_wildcard(conn, ssl_dir, args.zone, args.acme_bin)
+                issue_wildcard(conn, root, db_file, ssl_dir, args.zone, args.acme_bin)
+            elif args.command == "configure-renewal-hook":
+                from .renewal import configure_renewal_hook
+                configure_renewal_hook(root, db_file, ssl_dir, args.zone, args.acme_bin)
+            elif args.command == "sync-renewed":
+                from .renewal import sync_renewed
+                stub = sync_renewed(conn, root, ssl_dir, args.zone)
+                print(f"Validated and registered renewed certificate: {stub}")
     except (ValueError, OSError, subprocess.CalledProcessError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
