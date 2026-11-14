@@ -116,7 +116,7 @@ PAGE = """
 {% for d in z.covered %}<code>{{d}}</code>{% if not loop.last %}، {% endif %}{% endfor %}</p>
 {% if z.not_covered %}
 <div class="alert"><strong>زیر دامنه خارج از پوشش این Wildcard:</strong>
-{% for d in z.not_covered %}<code>{{d}}</code>{% if not loop.last %}، {% endif %}{% endfor %}{% endfor %}
+{% for d in z.not_covered %}<code>{{d}}</code>{% if not loop.last %}، {% endif %}{% endfor %}
 <p>برای این نام‌ها گواهی اختصاصی یا wildcard در سطح عمیق‌تر لازم است.</p></div>
 {% endif %}
 <form method="post" action="{{url_for('settings.ssl_request')}}">
