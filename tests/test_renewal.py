@@ -92,7 +92,7 @@ def test_expiring_cert_rejected(renewal_env):
     assert conn.execute("SELECT COUNT(*) FROM certificates").fetchone()[0] == 0
 
 
-def test_auto_deploy_marker_refuses_legacy_config_without_docker(renewal_env):
+def test_auto_deploy_marker_is_ignored_to_protect_manual_v1_config(renewal_env):
     conn, root, ssl, stage = renewal_env
     save_domain(conn, "example.com", redirect_www=True)
     save_route(conn, "example.com", "/", "192.168.1.178:3000")
@@ -101,8 +101,9 @@ def test_auto_deploy_marker_refuses_legacy_config_without_docker(renewal_env):
     legacy.write_text("# old production config\nserver { listen 443 ssl; }\n")
     marker = root / "data" / "enable-auto-deploy"
     marker.write_text("ALLOW_V2_MANAGED_DEPLOY\n")
-    with pytest.raises(ValueError, match="Unmanaged configuration"):
-        sync_renewed(conn, root, ssl, "example.com")
+    # The old auto-deploy marker is deliberately ignored. Renewal records
+    # a candidate and NEVER rewrites a manually managed V1 configuration.
+    sync_renewed(conn, root, ssl, "example.com")
     assert legacy.read_text().startswith("# old production")
     # The newly validated cert remains in the inventory; deployment was blocked.
     assert has_valid_wildcard(conn, ssl, "example.com")
