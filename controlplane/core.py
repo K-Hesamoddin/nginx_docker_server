@@ -6,6 +6,8 @@ import ipaddress
 import re
 import shlex
 import sqlite3
+import subprocess
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,6 +156,10 @@ def import_domains_list(conn: sqlite3.Connection, filename: str | Path) -> dict:
             if conn.execute("SELECT 1 FROM domains WHERE name=?", (domain,)).fetchone():
                 result["skipped"] += 1
                 continue
+            # Validate each route before making any changes for this line.
+            for path, target in zip(rest[::2], rest[1::2]):
+                route_path(path)
+                upstream(target)
             save_domain(conn, domain, redirect_www=(domain.count(".") == 1))
             for path, target in zip(rest[::2], rest[1::2]):
                 save_route(conn, domain, path, target)
@@ -205,6 +211,13 @@ def inspect_certificate(ssl_dir: str | Path, stub: str, min_days=14) -> CertInfo
         != private.public_key().public_bytes(serialization.Encoding.DER,
                                              serialization.PublicFormat.SubjectPublicKeyInfo)):
         raise ValueError(f"Private key mismatch for {stub}")
+    # Verify trust against the OS CA store (or a deliberate custom trust bundle).
+    ca_bundle = os.environ.get("CONTROLPLANE_CA_BUNDLE", "/etc/ssl/certs/ca-certificates.crt")
+    verification = subprocess.run(
+        ["openssl", "verify", "-CAfile", ca_bundle, "-untrusted", str(crt), str(crt)],
+        capture_output=True, text=True, check=False)
+    if verification.returncode != 0:
+        raise ValueError(f"Untrusted certificate chain for {stub}: {verification.stderr.strip()}")
     names = tuple(n.lower() for n in cert.extensions.get_extension_for_oid(
         ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value.get_values_for_type(x509.DNSName))
     expiry = cert.not_valid_after_utc
