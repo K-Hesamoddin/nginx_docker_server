@@ -77,6 +77,7 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
             path TEXT NOT NULL, target TEXT NOT NULL,
             strip_prefix INTEGER NOT NULL DEFAULT 1,
             websocket INTEGER NOT NULL DEFAULT 0,
+            proxy_uri TEXT,
             UNIQUE(domain, path)
         );
         CREATE TABLE IF NOT EXISTS certificates (
@@ -96,6 +97,11 @@ def open_db(db_path: str | Path) -> sqlite3.Connection:
             action TEXT NOT NULL, detail TEXT NOT NULL
         );
     """)
+    # Safe additive migration for the existing lab SQLite database.
+    if "proxy_uri" not in {
+        row[1] for row in conn.execute("PRAGMA table_info(routes)")
+    }:
+        conn.execute("ALTER TABLE routes ADD COLUMN proxy_uri TEXT")
     conn.commit()
     return conn
 
@@ -122,15 +128,19 @@ def save_domain(conn: sqlite3.Connection, domain: str, redirect_www=False,
 
 
 def save_route(conn: sqlite3.Connection, domain: str, path: str, target: str,
-               strip_prefix=True, websocket=False) -> None:
+               strip_prefix=True, websocket=False, proxy_uri=None) -> None:
     domain, path, target = hostname(domain), route_path(path), upstream(target)
+    if proxy_uri is not None:
+        if not isinstance(proxy_uri, str):
+            raise ValueError("Proxy URI must be a string or null")
+        proxy_uri = route_path(proxy_uri) if proxy_uri else ""
     if conn.execute("SELECT 1 FROM domains WHERE name=?", (domain,)).fetchone() is None:
         raise ValueError("Add domain before route")
-    conn.execute("""INSERT INTO routes(domain,path,target,strip_prefix,websocket)
-                    VALUES(?,?,?,?,?) ON CONFLICT(domain,path) DO UPDATE SET
+    conn.execute("""INSERT INTO routes(domain,path,target,strip_prefix,websocket,proxy_uri)
+                    VALUES(?,?,?,?,?,?) ON CONFLICT(domain,path) DO UPDATE SET
                     target=excluded.target, strip_prefix=excluded.strip_prefix,
-                    websocket=excluded.websocket""",
-                 (domain, path, target, int(bool(strip_prefix)), int(bool(websocket))))
+                    websocket=excluded.websocket, proxy_uri=excluded.proxy_uri""",
+                 (domain, path, target, int(bool(strip_prefix)), int(bool(websocket)), proxy_uri))
     audit(conn, "route-upsert", f"{domain} {path} -> {target}")
     conn.commit()
 
@@ -386,7 +396,14 @@ def render_config(conn: sqlite3.Connection, ssl_dir: str | Path, domain: str, *,
         # Validate again at the rendering boundary.
         upstream(target)
         route_path(path)
-        destination = f"http://{target}" + ("/" if r["strip_prefix"] else "")
+        # proxy_uri overrides legacy slash-stripping. It supports special
+        # locations like /health -> backend/health without accidental rewriting.
+        suffix = r["proxy_uri"] if r["proxy_uri"] is not None else (
+            "/" if r["strip_prefix"] else ""
+        )
+        if suffix:
+            route_path(suffix)
+        destination = f"http://{target}" + suffix
         lines += [f"    location {path} {{",
                   f"        proxy_pass {destination};",
                   "        proxy_http_version 1.1;"]
