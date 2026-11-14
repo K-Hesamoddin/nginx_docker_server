@@ -100,6 +100,32 @@ headers, unconditional legacy websocket headers, buffer include, access/error
 logging and original route ordering. Nonlegacy policy profiles remain
 opt-in. Review `proxy_pass` URI semantics for each route before any rollout.
 
+## Batch audit of every imported host (read-only)
+
+After the individual micmodshop.ir audit passes, run one nginx -T capture through the batch auditor:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+git pull --ff-only
+source .venv/bin/activate
+export CONTROLPLANE_ROOT="$PWD"
+export CONTROLPLANE_DB="$PWD/data/migration-review.sqlite3"
+python -m pytest -q tests/
+set -o pipefail
+sudo docker exec nginx-proxy nginx -T 2>/dev/null | \
+  python -m controlplane.cli audit-all --stdin
+```
+
+This command does not modify Nginx or run certbot. Only a compact JSON
+report (totals and discrepancies) is printed. The --include-matches option
+also lists passing hosts. Exit code 2 signals drift/unverified hosts.
+
+matched means common location/proxy_pass route mappings matched. drift means
+routes differ or parser warnings were raised. unverified means a matching
+conf/auto config header was not found. Unverified hosts may be deliberately
+managed elsewhere, but require manual review. This is not complete Nginx
+semantic equivalence or a TLS validity check.
+
 ## Local-only dashboard
 
 Generate a password hash using:
