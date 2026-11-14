@@ -173,3 +173,36 @@ def test_batch_audit_rejects_incomplete_dump(tmp_path):
     conn = fixture_db(tmp_path)
     with pytest.raises(ValueError, match="no config headers"):
         audit_all(conn, "Nginx error: no data")
+
+
+def test_structured_review_items_distinguish_uri_semantics_upstream_and_extra(tmp_path):
+    from controlplane.core import save_domain, save_route
+    conn = fixture_db(tmp_path)
+    save_domain(conn, "cloud.micromodern.ir")
+    save_route(conn, "cloud.micromodern.ir", "/", "192.168.1.52:8082")
+    cloud = (
+        "# configuration file /etc/nginx/conf.d/auto/cloud.micromodern.ir.conf:\n"
+        "server {\n  location / {\n"
+        "    proxy_pass http://192.168.1.52:8082;\n  }\n}\n"
+    )
+    result = audit_live(conn, cloud, "cloud.micromodern.ir")
+    assert not result["routes_match"]
+    assert result["review_items"] == [{
+        "kind": "proxy_pass_uri_semantics", "location": "/",
+        "inventory_proxy_pass": "http://192.168.1.52:8082/",
+        "live_proxy_pass": "http://192.168.1.52:8082",
+        "requires_approval": True,
+    }]
+    changed = DUMP.replace(
+        "proxy_pass http://192.168.1.178:1010/;",
+        "proxy_pass http://192.168.1.103:1010/;"
+    ).replace(
+        "  location /shop_backend/ {",
+        "  location /health {\n    proxy_pass http://192.168.1.178:9000;\n  }\n"
+        "  location /shop_backend/ {"
+    )
+    result = audit_live(conn, changed, "micmodshop.ir")
+    assert {x["kind"] for x in result["review_items"]} == {
+        "upstream_or_uri_changed", "unmanaged_live_location"
+    }
+    assert all(x["requires_approval"] for x in result["review_items"])
