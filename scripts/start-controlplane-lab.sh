@@ -25,8 +25,9 @@ fi
 
 # The password is read by getpass, not passed as a shell literal, argument,
 # environment variable or saved file. Its salted hash stays in this process.
-export PANEL_PASSWORD_HASH="$("$ROOT/.venv/bin/python" -c 'import getpass; from werkzeug.security import generate_password_hash; p=getpass.getpass("Lab admin password: "); assert len(p)>=12, "Use a password of 12+ characters"; print(generate_password_hash(p))')"
-export PANEL_SECRET_KEY="$("$ROOT/.venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+PANEL_PASSWORD_HASH="$("$ROOT/.venv/bin/python" -c 'import getpass; from werkzeug.security import generate_password_hash; p=getpass.getpass("Lab admin password: "); print(generate_password_hash(p)) if len(p)>=12 else exit("Use a password of 12+ characters")')"
+PANEL_SECRET_KEY="$("$ROOT/.venv/bin/python" -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export PANEL_PASSWORD_HASH PANEL_SECRET_KEY
 
 echo "Staging panel listening on 127.0.0.1:8787 ONLY."
 echo "Use an SSH port-forward to access /manage. Stop with Ctrl+C."
