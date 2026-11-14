@@ -34,8 +34,7 @@ cat > "$UNIT" <<EOF
 [Unit]
 Description=Nginx V2 staging admin over HTTPS on private LAN only
 Documentation=https://github.com/K-Hesamoddin/nginx_docker_server
-StartLimitIntervalSec=120
-StartLimitBurst=12
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
