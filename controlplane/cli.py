@@ -130,6 +130,9 @@ def main(argv=None):
     batch = subs.add_parser("audit-all", help="Audit all domains from a single nginx -T snapshot")
     batch.add_argument("--stdin", action="store_true", required=True)
     batch.add_argument("--include-matches", action="store_true")
+    snap = subs.add_parser("snapshot-live", help="Archive existing live configs in lab DB; no Nginx writes")
+    snap.add_argument("--stdin", action="store_true", required=True)
+    snap.add_argument("--domain")
     apply = subs.add_parser("apply")
     apply.add_argument("--yes", action="store_true")
     apply.add_argument("--allow-replace-v1", action="store_true")
@@ -171,6 +174,20 @@ def main(argv=None):
                 report = audit_all(conn, sys.stdin.read(), include_matches=args.include_matches)
                 print(json.dumps(report, indent=2, ensure_ascii=False))
                 if report["drift"] or report["unverified"]:
+                    return 2
+            elif args.command == "snapshot-live":
+                import json
+                from .management import ensure_schema, snapshot_all, snapshot_live
+                ensure_schema(conn)
+                dump = sys.stdin.read()
+                if args.domain:
+                    version = snapshot_live(conn, dump, args.domain)
+                    result = {"domain": args.domain, "version": version,
+                              "status": "stored" if version else "unchanged"}
+                else:
+                    result = snapshot_all(conn, dump)
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+                if isinstance(result, dict) and result.get("missing"):
                     return 2
             elif args.command == "preview":
                 configs = generated(conn, ssl_dir)
