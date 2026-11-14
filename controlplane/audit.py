@@ -85,7 +85,10 @@ def audit_live(conn: sqlite3.Connection, dump: str, domain: str) -> dict:
     expected = {}
     for r in conn.execute("SELECT * FROM routes WHERE domain=? ORDER BY id", (domain,)):
         path, target = route_path(r["path"]), upstream(r["target"])
-        expected[path] = f"http://{target}" + ("/" if r["strip_prefix"] else "")
+        suffix = r["proxy_uri"] if r["proxy_uri"] is not None else (
+            "/" if r["strip_prefix"] else ""
+        )
+        expected[path] = f"http://{target}" + suffix
     for path, url in expected.items():
         if path not in live_routes:
             mismatches.append(f"Missing live location: {path}")
