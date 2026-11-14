@@ -105,13 +105,18 @@ PAGE = """
 {% elif page == 'ssl' %}
 <h1>گواهی‌های یکپارچه پیشنهادی</h1>
 <p class="muted">هر درخواست Wildcard شامل نام اصلی zone و *.zone در SAN است. Wildcard فقط یک سطح از زیردامنه‌ها را پوشش می‌دهد.
-این فهرست از نام دامنه‌ها پیشنهاد شده و به معنی تأیید مالکیت DNS در NSIN نیست.</p>
+این فهرست از نام‌های دیتابیس <strong>و server_name در کانفیگ‌های بایگانی‌شده</strong> پیشنهاد شده و به معنی تأیید مالکیت DNS در NSIN یا اعتبار گواهی‌های موجود نیست. نام فایل گواهی به معنی معتبر بودن آن نیست.</p>
 <div class="grid">
 {% for z in zones %}
 <section class="panel">
 <div class="tag">{{z.count}} نام در محدوده پوشش</div>
 <h2 dir="ltr" style="text-align:left">{{z.zone}}</h2>
-<div><strong dir="ltr">{{z.wildcard}}</strong> + <code>{{z.zone}}</code></div>
+<div><strong dir="ltr">{{z.wildcard}}</strong> + <code>{{z.zone}}</code>
+{% if z.nested_zone %}<span class="tag">پوشش زیردامنه چندسطحی</span>{% endif %}</div>
+<p class="muted">گواهی‌های ارجاع‌شده در کانفیگ‌های قدیمی (اعتبار هنوز بررسی نشده):
+{% if z.archived_cert_paths %}
+{% for path in z.archived_cert_paths %}<code>{{path}}</code>{% if not loop.last %}، {% endif %}{% endfor %}
+{% else %}در آرشیو دامنه‌های این گروه مسیر گواهی یافت نشد{% endif %}</p>
 <p class="muted">پوشش پیشنهادی:
 {% for d in z.covered %}<code>{{d}}</code>{% if not loop.last %}، {% endif %}{% endfor %}</p>
 {% if z.not_covered %}
