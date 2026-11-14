@@ -7,13 +7,13 @@ Current capabilities:
 - SQLite inventory with idempotent legacy domains.list import and export for compatibility.
 - Certificate resolver chooses valid exact dedicated SAN first, then valid matching wildcard SAN; blocks config generation if no cert.
 - DNS-01 wildcard issue via acme.sh dns_nsin plugin (NSIN API credentials in environment only). No self-signed production fallback.
-- Explicit preview and guarded apply with backup, nginx -t, reload and rollback attempt.
+- Explicit per-domain draft generation, manual editor, immutable revision history, diffs and queued deploy/SSL requests (web UI; queue is not executed yet).
 - Tests and GitHub Actions checks.
 
 ## Important restrictions
 
-Admin edits stage only in SQLite; no live Nginx changes. CLI apply is intentionally a separate reviewed step.
-Certificate renewal uses an acme.sh reload hook to verify, archive and register new immutable certificates. Automatic live deployment stays OFF by default; a separate administrator marker is required, and the V2-only apply guard blocks overwriting legacy configs.
+Admin edits and request buttons stage changes only in SQLite; no live Nginx changes. The old bulk `apply` command is disabled to protect hand-edited configurations.
+Certificate renewal uses an acme.sh hook to verify and register immutable certificate candidates. Automatic config regeneration and reload are forbidden; all publication needs a reviewed per-domain revision.
 Certificate verification checks SAN, key match, dates and CA-chain trust against a system CA bundle (or CONTROLPLANE_CA_BUNDLE). Production still requires external TLS and deployment integration testing.
 Generated config supports common HTTP reverse proxies and basic policy profiles. Migrate custom per-site snippets only after reviewing diffs.
 First activation is a migration, not a blind replacement. Never run legacy setup.sh to deploy the new manager.
@@ -144,6 +144,55 @@ Do not automatically reconcile those differences and do not use the
 `apply` or `--allow-replace-v1` commands on production. Review site-specific
 locations and security settings beyond the current simplistic parser.
 
+## Per-domain drafts, edits, history, rollback requests and SSL status
+
+Phase-1 UI uses Flask exclusively for unprivileged SQLite staging. After
+configuring the login described below, browse `/manage`, choose a domain,
+and explicitly click **Generate from routes**. Merely changing `routes`,
+the upstream, a security profile or a domain does NOT overwrite a saved
+draft or regenerate any live Nginx file.
+
+Every generation and manual textarea save creates an immutable revision,
+timestamp, SHA256 fingerprint and optional note. The UI offers version
+history, a unified diff against the previous version, and selection of an
+older version as a rollback request. `/manage` shows job states.
+
+Imported legacy update flags including `0` remain read-only metadata.
+The true original V1 conf must be snapshotted explicitly before migration:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+source .venv/bin/activate
+export CONTROLPLANE_ROOT="$PWD"
+export CONTROLPLANE_DB="$PWD/data/migration-review.sqlite3"
+set -o pipefail
+sudo docker exec nginx-proxy nginx -T 2>/dev/null | \
+  python -m controlplane.cli snapshot-live --stdin
+```
+
+This archives each existing `conf/auto/*.conf` in protected lab SQLite as
+`live_snapshot` for reference. It never marks a snapshot as V2-deployed,
+never copies private key files and never modifies Nginx. Config files can
+contain sensitive values, so keep this lab database private and never upload
+it publicly.
+
+Some legacy proxy_pass directives contain a custom URI e.g. `/health`,
+`/packs`, or no URI at all. Each route now has an optional `proxy_uri`
+override, independent of host:port. The old `strip_prefix` boolean remains
+for default behavior. The `domains.list` export cannot encode all V2-only
+metadata, so treat it as a legacy compatibility snapshot, not a full backup.
+
+Without a registered valid certificate, Generate makes a DRAFT with
+`PENDING-SSL` placeholders. Such drafts cannot be queued for deployment.
+Each domain also offers an on-demand origin TLS check using SNI against
+`127.0.0.1:443`; it reports issuer and expiry but does NOT test NSIN's edge.
+
+**Not connected to production yet:** the Deploy/Restore and SSL Request
+buttons only record durable `pending` jobs. They do not run Docker, acme.sh,
+certbot, DNS API calls, reload or Compose. A locked-down privileged runner,
+approval policy, CA/DNS provider integration, staging tests and rollback
+must be completed before enabling execution. Do NOT expose this UI publicly.
+
 ## Local-only dashboard
 
 Generate a password hash using:
@@ -179,29 +228,22 @@ certificate, run:
 You can manually test the hook after a *staging* ACME install with:
   python -m controlplane.cli sync-renewed micmodshop.ir
 
-**Safe-by-default:** certificate synchronization does not change Nginx.
-After ALL configured domains have been migrated to V2, reviewed against current
-configs and tested on staging, a privileged administrator may opt in to automatic
-V2-only deployment by placing the exact string
-`ALLOW_V2_MANAGED_DEPLOY` in `data/enable-auto-deploy`.
-This marker must be root-owned and never editable by the web panel.
-Do not create this file in production yet. A renewal then invokes guarded
-config apply, Nginx validation and rollback attempts. A rejected legacy config
-stops deployment rather than overwriting it.
-The old certificate artifacts remain for rollback.
+**Safe-by-default:** certificate synchronization records a validated candidate only.
+Even if an old auto-deploy marker exists, it is ignored; certificate renewal
+never rewrites a manually managed site or reloads the running container.
+Saved prior certificate versions remain available for future rollback.
 
 Cert for micmodshop.ir + *.micmodshop.ir covers www and api at one level, NOT test.api.micmodshop.ir.
 After a certificate is registered, review generated configuration:
   python -m controlplane.cli preview > /tmp/v2-preview.txt
 
-Promotion is deliberate, and first adoption requires --allow-replace-v1 after a config diff and backup:
-  python -m controlplane.cli apply --yes --allow-replace-v1
+The old bulk `apply` command is intentionally disabled. A separate privileged executor with strict validation, audit, backup and rollback remains to be built and vetted for production.
 
 ## Phase 2 work required before production
 
 - Complete operational renewal-to-deploy integration tests, CA-chain edge cases and expiry alerts.
-- Per-site safe diffs, preview of migrated advanced config, complete rollback, disabled-host removal handling.
-- Role-based users, approvals and privileged runner separation; a queue for issue/deploy actions from the panel.
+- Privileged execution worker and strict per-domain validation, backups, nginx -t/reload, active revision tracking and atomic rollback.
+- Role-based users, per-domain approvals and privilege separation; the queue exists but its executor is not yet installed.
 - Harden security policy engine for CSP/HSTS/CORS, real IP trust ranges and per-route cache bypass.
 - Nginx dry-run integration tests, staged deployment to external test host, monitoring and audited recovery.
 - Reconcile current Certbot lineages; many renewal jobs fail because standalone cannot bind port 80.
