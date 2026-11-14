@@ -246,3 +246,21 @@ def test_wildcard_proposals_include_names_from_archived_server_name(db):
     assert "_" not in names
     group = next(z for z in recommended_zones(db) if z["zone"] == "micromodern.ir")
     assert "custom.micromodern.ir" in group["covered"]
+
+
+def test_archived_ssl_certificate_paths_visible_but_not_treated_as_verified(db):
+    from controlplane.admin_features import archived_certificate_paths
+    from controlplane.management import store_version
+    body = """server {
+      server_name cloud.micromodern.ir;
+      ssl_certificate /etc/nginx/ssl/cloud.micromodern.ir.crt;
+      ssl_certificate_key /etc/nginx/ssl/cloud.micromodern.ir.key;
+    }"""
+    store_version(db, "cloud.micromodern.ir", body, "live_snapshot")
+    refs = archived_certificate_paths(db)
+    assert refs["cloud.micromodern.ir"] == [
+        "/etc/nginx/ssl/cloud.micromodern.ir.crt"
+    ]
+    assert all(not p.endswith(".key") for paths in refs.values() for p in paths)
+    zone = next(z for z in recommended_zones(db) if z["zone"] == "micromodern.ir")
+    assert refs["cloud.micromodern.ir"][0] in zone["archived_cert_paths"]
