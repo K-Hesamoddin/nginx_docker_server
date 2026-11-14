@@ -229,3 +229,20 @@ def test_management_search_filters_domain_cards(db, login):
     assert b"cloud.micromodern.ir" in result.data
     assert b"micmodshop.ir" not in result.data
     assert b"ssl" in result.data.lower()
+
+
+def test_wildcard_proposals_include_names_from_archived_server_name(db):
+    from controlplane.admin_features import known_inventory_hosts
+    from controlplane.management import store_version
+    body = """server {
+      server_name cloud.micromodern.ir custom.micromodern.ir;
+      location / { proxy_pass http://192.168.1.52:8082; }
+    }
+    server { server_name _; }
+    """
+    store_version(db, "cloud.micromodern.ir", body, "live_snapshot")
+    names = known_inventory_hosts(db)
+    assert "custom.micromodern.ir" in names
+    assert "_" not in names
+    group = next(z for z in recommended_zones(db) if z["zone"] == "micromodern.ir")
+    assert "custom.micromodern.ir" in group["covered"]
