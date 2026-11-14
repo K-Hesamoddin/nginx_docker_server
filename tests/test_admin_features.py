@@ -113,6 +113,10 @@ def test_ssl_wildcard_groups_and_deep_domain_warning(db, login):
     assert "cloud.micromodern.ir" in mm["covered"]
     assert "test.erp.micromodern.ir" in mm["not_covered"]
     assert "*.micromodern.ir" == mm["wildcard"]
+    nested = next(z for z in zones if z["zone"] == "erp.micromodern.ir")
+    assert nested["wildcard"] == "*.erp.micromodern.ir"
+    assert nested["nested_zone"]
+    assert "test.erp.micromodern.ir" in nested["covered"]
     client, csrf = login
     resp = client.get("/admin/ssl")
     assert resp.status_code == 200
