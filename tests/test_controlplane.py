@@ -66,9 +66,13 @@ def test_wildcard_preferred_over_dedicated_with_legacy_fallback(tmp_path, monkey
     assert resolve_certificate(db, tmp_path, "example.com").stub == "wildcard"
     # Old dedicated files can still be a fallback if wildcard expires;
     # no new per-subdomain issuance is allowed by the panel.
-    make_cert(tmp_path, "wildcard", ["example.com", "*.example.com"], expired=True)
+    # Temporarily remove the wildcard file rather than creating a second
+    # test CA with identical subject (ambiguous OpenSSL chain verification).
+    wildcard_crt = tmp_path / "wildcard.crt"
+    original_cert = wildcard_crt.read_bytes()
+    wildcard_crt.unlink()
     assert resolve_certificate(db, tmp_path, "www.example.com").stub == "dedicated"
-    make_cert(tmp_path, "wildcard", ["example.com", "*.example.com"])
+    wildcard_crt.write_bytes(original_cert)
     save_domain(db, "example.com", redirect_www=True)
     save_route(db, "example.com", "/", "192.168.1.178:3000")
     conf = render_config(db, tmp_path, "example.com")
