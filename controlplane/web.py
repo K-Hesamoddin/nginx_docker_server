@@ -51,6 +51,7 @@ details summary{cursor:pointer;font-weight:650;padding:8px 0}
 <a href="/admin/ssl">گواهی‌های Wildcard</a>
 <a href="/admin/includes">امنیت و Includeها</a>
 <a href="/admin/streams">Streamها</a>
+<a href="/help">راهنما و تورهای آموزشی</a>
 {% if session.get('role')=='admin' %}<a href="/admin/users">کاربران</a><a href="/admin/access">IPهای مجاز</a>{% endif %}
 </nav>{% endif %}</div>
 {% if session.get('auth') %}
@@ -262,6 +263,8 @@ def create_app():
 
     from .management_ui import bp as management_bp
     from .admin_ui import bp as settings_bp
+    from .help_ui import bp as help_bp
     app.register_blueprint(management_bp)
     app.register_blueprint(settings_bp)
+    app.register_blueprint(help_bp)
     return app
