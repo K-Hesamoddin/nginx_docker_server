@@ -87,9 +87,12 @@ def test_http_preflight_is_authorized_read_only(inventory):
     r = client.get("/manage/staging.example.com/preflight")
     assert r.status_code == 200
     assert "بررسی آمادگی مهاجرت".encode() in r.data
-    assert "nginx -t".encode() not in r.data or b"nginx -t" in r.data
+    assert b"nginx -t" in r.data
     assert client.get("/manage/staging.example.com").status_code == 200
     assert b"/manage/staging.example.com/preflight" in client.get("/manage/staging.example.com").data
     assert db.execute("SELECT count(*) FROM audit").fetchone()[0] == before
     assert db.execute("SELECT count(*) FROM operator_jobs").fetchone()[0] == 0
-    assert client.post("/manage/staging.example.com/preflight").status_code == 405
+    with client.session_transaction() as sess:
+        csrf = sess["csrf"]
+    assert client.post("/manage/staging.example.com/preflight",
+                       data={"csrf": csrf}).status_code == 405
