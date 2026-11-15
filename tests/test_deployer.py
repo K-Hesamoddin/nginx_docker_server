@@ -105,7 +105,7 @@ def test_execute_success_updates_only_approved_job_with_backup(ready, monkeypatc
     result = _execute(ready)
     assert result["status"] == "succeeded"
     assert target.read_text().endswith("# reviewed\n")
-    assert (root / "conf" / "auto").glob("*.new")
+    assert not list((root / "conf" / "auto").glob("*.new"))
     assert (deployer.Path(result["backup"]) / "before.conf").read_bytes() == previous
     assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "succeeded"
     assert db.execute("SELECT deployed_version_id FROM config_heads WHERE domain='example.com'").fetchone()[0] == rid
@@ -129,9 +129,31 @@ def test_execute_failed_new_nginx_test_restores_previous_file(ready, monkeypatch
         _execute(ready)
     assert target.read_bytes() == old
     assert calls.count(("exec", "nginx-proxy", "nginx", "-s", "reload")) == 1
-    assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "pending"
+    assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "failed"
     assert db.execute("SELECT deployed_version_id FROM config_heads WHERE domain='example.com'").fetchone()[0] is None
     assert list((root / "data" / "v2-deploy-backups").glob("*/before.conf"))
+
+
+
+def test_failing_www_origin_rolls_back_and_logs_failure(ready, monkeypatch):
+    db, root, rid, job_id, target = ready
+    previous = target.read_bytes()
+    seen = []
+    monkeypatch.setattr(deployer, "_verify_mounts", lambda _: None)
+    monkeypatch.setattr(deployer, "_docker", lambda *args: "")
+    def check(host):
+        seen.append(host)
+        if host == "www.example.com":
+            raise ValueError("Expired or failed www handshake")
+        return 200
+    monkeypatch.setattr(deployer, "_probe", check)
+    with pytest.raises(ValueError, match="www"):
+        _execute(ready)
+    assert seen == ["example.com", "www.example.com"]
+    assert target.read_bytes() == previous
+    row = db.execute("SELECT status,result FROM operator_jobs WHERE id=?", (job_id,)).fetchone()
+    assert row["status"] == "failed"
+    assert "restored" in row["result"]
 
 
 def test_execute_legacy_manual_domain_needs_separate_approval(ready, monkeypatch):
