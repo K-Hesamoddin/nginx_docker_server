@@ -58,7 +58,7 @@ nav{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:10px}
 <a href="/admin/ssl">SSL یکپارچه</a><a href="/admin/includes">امنیت و Include</a>
 <a href="/admin/streams">Stream</a>{% if session.get('role')=='admin' %}
 <a href="/admin/users">کاربران</a><a href="/admin/access">IPهای مجاز</a>{% endif %}
-<a href="/">پنل اولیه</a></nav>
+<a href="/">پنل اولیه</a><a href="/help">راهنما و تورها</a></nav>
 <p class="notice">محیط آزمایشی: دکمه درخواست انتشار یا SSL فقط یک کار در صف ثبت می‌کند.
 هنوز هیچ سرویس اجرایی مجاز به تغییر Nginx یا صدور واقعی گواهی از این پنل متصل نشده است.</p>
 </header>
@@ -66,6 +66,14 @@ nav{display:flex;gap:15px;flex-wrap:wrap;margin-bottom:10px}
 <section><strong>{{message}}</strong></section>
 {% endfor %}
 {% if mode == "index" %}
+<section>
+<strong>راهنمای این صفحه:</strong>
+<a href="/help/domains">دامنه‌ها</a> |
+<a href="/help/routes">Route و Proxy</a> |
+<a href="/help/versions">تاریخچه و Diff</a> |
+<a href="/help/jobs">صف عملیات</a> |
+<a href="/help/domains/tour?step=1">شروع تور دامنه‌ها</a>
+</section>
 <section><h2>دامنه‌ها و نسخه‌های کانفیگ</h2>
 <form method="get" action="/manage" class="search">
 <input type="search" name="q" value="{{q}}" placeholder="جست‌وجوی دامنه؛ مثل cloud یا micromodern">
@@ -90,6 +98,14 @@ V2 deployed: {{item.deployed if item.deployed else 'خیر'}}</div>
 <td>{{job.version_id or '—'}}</td><td>{{job.status}}</td><td>{{job.result}}</td></tr>{% endfor %}</table>
 </section>
 {% else %}
+<section>
+<strong>راهنمای کاربردی این دامنه:</strong>
+<a href="/help/routes">ویرایش Route</a> |
+<a href="/help/versions">تولید، ویرایش، Diff و Rollback</a> |
+<a href="/help/ssl">SSL</a> |
+<a href="/help/routes/tour?step=1">تور Routeها</a> |
+<a href="/help/versions/tour?step=1">تور تاریخچه</a>
+</section>
 <section><h2>{{domain}}</h2>
 <p>SSL در دیتابیس V2: <strong>{{ssl}}</strong>. این وضعیت جای بررسی TLS زنده و ثبت گواهی‌های قدیمی را نمی‌گیرد.</p>
 <p><a href="{{url_for('manager.detail',domain=domain,tls=1)}}">بررسی گواهی TLS واقعی از طریق 127.0.0.1:443 با SNI</a></p>
