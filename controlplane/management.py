@@ -187,24 +187,34 @@ def queue_deployment(conn: sqlite3.Connection, domain: str,
 
 
 def queue_certificate(conn: sqlite3.Connection, zone: str, kind: str) -> int:
-    """Queue explicit DNS-01 request; API tokens never enter SQLite."""
+    """Stage one wildcard request per DNS zone, never per-subdomain certs.
+
+    The panel is not an ACME worker. Existing dedicated certificate records
+    and historical jobs are preserved; no new dedicated issuance is accepted.
+    """
     zone = hostname(zone)
-    if kind not in {"dedicated", "wildcard"}:
-        raise ValueError("Certificate kind must be dedicated or wildcard")
-    # A host explicitly present in an archived live server_name also counts as
-    # an operator-known alias. The job is only queued, never issued here.
-    from .admin_features import known_inventory_hosts
-    existing = known_inventory_hosts(conn)
-    if kind == "dedicated":
-        alias = zone.startswith("www.") and zone[4:] in existing
-        if zone not in existing and not alias:
-            raise ValueError("Add the domain or its apex before requesting a dedicated cert")
-    elif not (zone in existing or any(d.endswith("." + zone) for d in existing)):
-        raise ValueError("Zone is not related to a registered hostname")
+    if kind != "wildcard":
+        raise ValueError("صدور گواهی اختصاصی برای ساب‌دامنه در V2 غیرفعال است؛ از Wildcard مشترک Zone استفاده کن.")
+    # Prevent requesting an accidental *.www.example.com (or arbitrary host).
+    # Only propose known DNS-zone candidates. Confirm actual DNS authority
+    # and provider before any future execution, never infer it from A records.
+    from .admin_features import recommended_zones
+    candidate_zones = {item["zone"] for item in recommended_zones(conn)}
+    if zone not in candidate_zones:
+        raise ValueError("Zone انتخاب‌شده در گروه‌های پیشنهادی SSL نیست؛ آن را از صفحه /admin/ssl انتخاب کن.")
     with conn:
+        # Repeated clicks must not create duplicate pending issuance jobs.
+        existing = conn.execute(
+            """SELECT id FROM operator_jobs
+               WHERE kind='issue-wildcard' AND domain=? AND status IN ('pending','running')
+               ORDER BY id DESC LIMIT 1""", (zone,)
+        ).fetchone()
+        if existing:
+            return existing["id"]
         job = conn.execute(
-            "INSERT INTO operator_jobs(kind,domain) VALUES(?,?)",
-            (f"issue-{kind}", zone)
+            "INSERT INTO operator_jobs(kind,domain) VALUES('issue-wildcard',?)",
+            (zone,)
         )
-        audit(conn, "certificate-requested", f"{kind} {zone} job #{job.lastrowid}")
-    return job.lastrowid
+        audit(conn, "certificate-requested",
+              f"wildcard {zone} + *.{zone} job #{job.lastrowid}")
+        return job.lastrowid
