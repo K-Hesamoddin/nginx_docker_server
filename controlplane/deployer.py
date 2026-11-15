@@ -243,11 +243,22 @@ def execute_job(conn: sqlite3.Connection, root: Path, job_id: int, *,
                 reviewed_legacy: bool = False) -> dict:
     """Operator-only action. Must never be invoked by the web request handler."""
     root = root.absolute()
-    lock_dir = root / "data"
-    _no_symlink(lock_dir)
-    if not lock_dir.is_dir():
-        raise ValueError("Production data/ directory missing")
-    with (lock_dir / "v2-oneshot-deploy.lock").open("a+") as lock:
+    # Operator state belongs to the V2 database's existing data directory,
+    # never to the unrelated V1 production Nginx tree. Requiring production
+    # data/ broke existing production layouts and needlessly wrote there.
+    db_files = conn.execute("PRAGMA database_list").fetchall()
+    main_db = next((entry[2] for entry in db_files if entry[1] == "main"), "")
+    if not main_db:
+        raise ValueError("A file-backed V2 SQLite database is required for deployment")
+    state_dir = Path(main_db).absolute().parent
+    _no_symlink(state_dir)
+    if not state_dir.is_dir():
+        raise ValueError("V2 database data directory is missing")
+    if stat.S_IMODE(state_dir.stat().st_mode) & 0o002:
+        raise ValueError("V2 state directory must not be world-writable")
+    lock_path = state_dir / "v2-oneshot-deploy.lock"
+    lock_fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(lock_fd, "a+") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         plan = plan_job(conn, root, job_id)
         if plan["blockers"]:
@@ -272,7 +283,7 @@ def execute_job(conn: sqlite3.Connection, root: Path, job_id: int, *,
         body = version["body"].encode("utf-8")
         if digest(old) != expected_current_sha256:
             raise ValueError("Live file changed during validation")
-        backup_root = lock_dir / "v2-deploy-backups"
+        backup_root = state_dir / "v2-deploy-backups"
         _no_symlink(backup_root)
         backup_root.mkdir(mode=0o700, exist_ok=True)
         backup = backup_root / (str(int(time.time())) + "-job" + str(job_id))
