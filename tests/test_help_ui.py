@@ -1,5 +1,6 @@
 """The Persian handbook and every tour are linked, read-only and access-controlled."""
 import pytest
+from markupsafe import escape
 from werkzeug.security import generate_password_hash
 
 from controlplane.core import open_db, save_domain, save_route
@@ -55,8 +56,8 @@ def test_all_help_pages_render_guide_and_step_tours(site):
             tour = client.get(f"/help/{key}/tour?step={step_idx}")
             assert tour.status_code == 200, (key, step_idx)
             assert heading.encode() in tour.data
-            assert description.encode() in tour.data
-            assert verify.encode() in tour.data
+            assert str(escape(description)).encode() in tour.data
+            assert str(escape(verify)).encode() in tour.data
             assert f"گام {step_idx} از {len(entry['steps'])}".encode() in tour.data
         assert client.get(f"/help/{key}/tour?step=0").status_code == 404
         assert client.get(f"/help/{key}/tour?step=999").status_code == 404
