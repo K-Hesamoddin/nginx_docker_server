@@ -1,5 +1,45 @@
 # Nginx Control Plane V2 (feature preview)
 
+
+## Persian in-panel operations guide and step-by-step tours
+
+The V2 lab panel has a self-contained, authenticated **فارسی راهنمای پنل**:
+
+- \`https://192.168.1.205:8787/help\` — full guide index.
+- \`/help/overview\` — login and safe workflow.
+- \`/help/domains\` and \`/help/routes\` — domain creation, upstream/URI behavior, legacy migration exceptions.
+- \`/help/versions\` — immutable revisions, snapshots, Generate, manual editing, diffs and queued rollback.
+- \`/help/ssl\` — dedicated/wildcard coverage, SAN, pending DNS-01 requests and certificate status limitations.
+- \`/help/security\` — per-domain security headers, Include catalog and versioned snippet drafts.
+- \`/help/streams\` — staged TCP/UDP listener, protocol, backend and stream context constraints.
+- \`/help/users\` — Viewer/Editor/Admin roles, second accounts and revocation.
+- \`/help/access\` — direct LAN IP/CIDR allowlist, HTTP 403 versus network timeout.
+- \`/help/jobs\` — statuses and the fact that there is no deploy/ACME worker yet.
+- \`/help/troubleshooting\` — safe health checks and HTTPS/operator password recovery.
+
+Every guide has a **شروع تور** link to a GET-only server-rendered wizard with Next/Previous,
+step counter, current task, expected check and link to its real panel page. The
+pages in \`/admin\`, \`/admin/ssl\`, \`/admin/includes\`, \`/admin/streams\`,
+\`/admin/users\`, \`/admin/access\` and \`/manage\` each display a contextual
+guide and tour link. This avoids weakening the current strict CSP with scripts.
+These routes require existing authentication and the same source-IP ACL.
+
+**Operational scope:** The help explicitly distinguishes lab-only state changes
+from real Nginx/Docker/NSIN actions. Reading the guide or taking a tour never
+changes config, creates a job, manipulates ACLs or writes a certificate.
+
+After merging the feature branch into the lab checkout, restart **only**
+the unprivileged user panel service (not Docker and not nginx-proxy):
+
+\`\`\`bash
+cd /home/cms/nginx-control-plane-v2-lab
+git pull --ff-only
+source .venv/bin/activate
+python -m pytest -q tests/
+systemctl --user restart nginx-controlplane-v2
+\`\`\`
+
+
 ## Direct private-LAN HTTPS access (no workstation tunnel)
 
 The LAN pilot is separate from Docker and the production nginx-proxy. It does
