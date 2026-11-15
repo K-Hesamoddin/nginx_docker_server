@@ -13,9 +13,9 @@ from tests.test_controlplane import make_cert
 @pytest.fixture
 def ready(tmp_path, monkeypatch):
     root = tmp_path / "production-copy"
-    for name in ("conf/auto", "ssl", "data"):
+    for name in ("conf/auto", "ssl"):
         (root / name).mkdir(parents=True)
-    db_file = tmp_path / "lab.sqlite3"
+    db_file = tmp_path / "lab" / "data" / "lab.sqlite3"
     db = open_db(db_file)
     ensure_schema(db)
     monkeypatch.setenv("CONTROLPLANE_CA_BUNDLE",
@@ -64,7 +64,8 @@ def test_plan_checks_shared_wildcard_and_does_not_touch_live_or_docker(ready, mo
     assert report["current_sha256"] == hashlib.sha256(original).hexdigest()
     assert target.read_bytes() == original
     assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "pending"
-    assert not (root / "data" / "v2-deploy-backups").exists()
+    assert not (db.execute("PRAGMA database_list").fetchone()[2] and
+                deployer.Path(db.execute("PRAGMA database_list").fetchone()[2]).parent.joinpath("v2-deploy-backups").exists())
 
 
 def test_plan_blocks_pending_ssl_and_wrong_cert_or_unsafe_target(ready):
@@ -107,6 +108,8 @@ def test_execute_success_updates_only_approved_job_with_backup(ready, monkeypatc
     assert target.read_text().endswith("# reviewed\n")
     assert not list((root / "conf" / "auto").glob("*.new"))
     assert (deployer.Path(result["backup"]) / "before.conf").read_bytes() == previous
+    assert deployer.Path(result["backup"]).parent == deployer.Path(db.execute("PRAGMA database_list").fetchone()[2]).parent / "v2-deploy-backups"
+    assert not (root / "data").exists()
     assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "succeeded"
     assert db.execute("SELECT deployed_version_id FROM config_heads WHERE domain='example.com'").fetchone()[0] == rid
     assert calls.count(("exec", "nginx-proxy", "nginx", "-t")) == 2
@@ -131,7 +134,8 @@ def test_execute_failed_new_nginx_test_restores_previous_file(ready, monkeypatch
     assert calls.count(("exec", "nginx-proxy", "nginx", "-s", "reload")) == 1
     assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "failed"
     assert db.execute("SELECT deployed_version_id FROM config_heads WHERE domain='example.com'").fetchone()[0] is None
-    assert list((root / "data" / "v2-deploy-backups").glob("*/before.conf"))
+    state_dir = deployer.Path(db.execute("PRAGMA database_list").fetchone()[2]).parent
+    assert list((state_dir / "v2-deploy-backups").glob("*/before.conf"))
 
 
 
