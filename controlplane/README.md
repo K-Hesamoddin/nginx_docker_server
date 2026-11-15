@@ -214,7 +214,7 @@ buttons write pending jobs to SQLite and never touch production.
 Current capabilities:
 - Local-only password-protected and CSRF-protected Flask admin UI for domains, routes, registered certificates and policy profile.
 - SQLite inventory with idempotent legacy domains.list import and export for compatibility.
-- Certificate resolver chooses a valid dedicated SAN first, then matching wildcard SAN. Drafts can show PENDING-SSL, but live render and queued deploy of those drafts are blocked.
+- Certificate resolver in V2 drafts prefers a verified shared wildcard SAN first, with a valid existing dedicated SAN only as a legacy fallback. Drafts can show PENDING-SSL, but live render and queued deploy of those drafts are blocked.
 - Existing experimental NSIN-only CLI wildcard issuer (not connected to the web UI); per-zone Cloudflare/NSIN/other/manual selection is staging metadata only. No self-signed production fallback.
 - Explicit per-domain draft generation, manual editor, immutable revision history, diffs and queued deploy/SSL requests (web UI; queue is not executed yet).
 - Tests and GitHub Actions checks.
