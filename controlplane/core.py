@@ -308,7 +308,16 @@ def inspect_certificate(ssl_dir: str | Path, stub: str, min_days=14) -> CertInfo
         raise ValueError(f"Untrusted certificate chain for {stub}: {verification.stderr.strip()}")
     names = tuple(n.lower() for n in cert.extensions.get_extension_for_oid(
         ExtensionOID.SUBJECT_ALTERNATIVE_NAME).value.get_values_for_type(x509.DNSName))
-    expiry = cert.not_valid_after_utc
+    # cryptography <42 exposes only the naive-UTC not_valid_after attribute.
+    # acme.sh reload hooks may run with the host Python rather than the venv;
+    # preserve the same timezone-aware expiry check on both versions.
+    expiry = getattr(cert, "not_valid_after_utc", None)
+    if expiry is None:
+        expiry = cert.not_valid_after
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=dt.timezone.utc)
+        else:
+            expiry = expiry.astimezone(dt.timezone.utc)
     if expiry <= dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=min_days):
         raise ValueError(f"Certificate {stub} expired or within {min_days} days of expiry")
     return CertInfo(stub, names, expiry, crt, key)
