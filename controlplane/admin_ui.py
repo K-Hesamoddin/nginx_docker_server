@@ -14,8 +14,9 @@ from flask import (
 
 from .admin_features import (
     add_allowed_net, add_stream, allowed_networks, delete_stream, ensure_features,
-    include_history, include_version_diff, recommended_zones, register_include,
-    remove_allowed_net, save_include_revision, set_domain_include,
+    get_zone_provider, include_history, include_version_diff,
+    recommended_zones, register_include, remove_allowed_net,
+    save_include_revision, set_dns_zone_provider, set_domain_include,
     set_security_options, stream_preview, user_update, user_upsert,
 )
 from .core import hostname, open_db
@@ -113,7 +114,10 @@ PAGE = """
 {% elif page == 'ssl' %}
 <h1>گواهی‌های یکپارچه پیشنهادی</h1>
 <p class="muted">هر درخواست Wildcard شامل نام اصلی zone و *.zone در SAN است. Wildcard فقط یک سطح از زیردامنه‌ها را پوشش می‌دهد.
-این فهرست از نام‌های دیتابیس <strong>و server_name در کانفیگ‌های بایگانی‌شده</strong> پیشنهاد شده و به معنی تأیید مالکیت DNS در NSIN یا اعتبار گواهی‌های موجود نیست. نام فایل گواهی به معنی معتبر بودن آن نیست.</p>
+این فهرست از نام‌های دیتابیس <strong>و server_name در کانفیگ‌های بایگانی‌شده</strong> پیشنهاد شده و به معنی تشخیص خودکار سرویس‌دهنده DNS، مالکیت Zone یا اعتبار گواهی‌های موجود نیست. نام فایل گواهی به معنی معتبر بودن آن نیست.</p>
+<div class="alert"><strong>روش ساده:</strong> برای هر Zone فقط سرویس‌دهنده DNS آن را انتخاب کن؛ Cloudflare، NSIN، DNS دیگر یا روش دستی.
+این انتخاب صرفاً در دیتابیس ثبت می‌شود؛ هیچ API Key، رکورد TXT یا درخواست ACME از این صفحه اجرا نمی‌شود.
+برای Wildcard، DNS-01 لازم است؛ تمدید خودکار در حالت دستی تضمین نمی‌شود.</div>
 <div class="grid">
 {% for z in zones %}
 <section class="panel">
@@ -121,6 +125,21 @@ PAGE = """
 <h2 dir="ltr" style="text-align:left">{{z.zone}}</h2>
 <div><strong dir="ltr">{{z.wildcard}}</strong> + <code>{{z.zone}}</code>
 {% if z.nested_zone %}<span class="tag">پوشش زیردامنه چندسطحی</span>{% endif %}</div>
+<p class="muted">سرویس‌دهنده DNS انتخاب‌شده: <strong>{{z.dns_provider}}</strong> (فقط تنظیم آزمایشی)</p>
+{% if session.get('role') == 'admin' %}
+<form method="post" action="{{url_for('settings.dns_provider_save')}}">
+<input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="zone" value="{{z.zone}}">
+<label>DNS Provider <select name="provider">
+<option value="unconfigured" {{'selected' if z.dns_provider=='unconfigured' else ''}}>هنوز مشخص نشده</option>
+<option value="cloudflare" {{'selected' if z.dns_provider=='cloudflare' else ''}}>Cloudflare</option>
+<option value="nsin" {{'selected' if z.dns_provider=='nsin' else ''}}>NSIN</option>
+<option value="other" {{'selected' if z.dns_provider=='other' else ''}}>DNS دیگر / API سفارشی</option>
+<option value="manual" {{'selected' if z.dns_provider=='manual' else ''}}>DNS دستی (TXT)</option>
+</select></label>
+<button class="secondary">ذخیره ارائه‌دهنده</button>
+</form>
+{% endif %}
 <p class="muted">گواهی‌های ارجاع‌شده در کانفیگ‌های قدیمی (اعتبار هنوز بررسی نشده):
 {% if z.archived_cert_paths %}
 {% for path in z.archived_cert_paths %}<code>{{path}}</code>{% if not loop.last %}، {% endif %}{% endfor %}
@@ -344,7 +363,19 @@ def dashboard():
 def ssl():
     with _connect() as db:
         zones = recommended_zones(db)
+        for zone in zones:
+            zone["dns_provider"] = get_zone_provider(db, zone["zone"])
     return _render("ssl", zones=zones)
+
+
+@bp.post("/admin/ssl/provider")
+def dns_provider_save():
+    return _try(
+        lambda db: set_dns_zone_provider(
+            db, request.form["zone"], request.form["provider"]
+        ),
+        url_for("settings.ssl")
+    )
 
 
 @bp.post("/admin/ssl/request")
