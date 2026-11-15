@@ -117,6 +117,9 @@ Reason: {{tls_result.reason}}</p>
 <p><small>این تست فقط Nginx محلی را بررسی می‌کند، نه اتصال عمومی یا لبه CDN.</small></p>{% endif %}
 <p>نسخه پیش‌نویس: {{head.draft_version_id if head else 'ندارد'}} |
 منتشرشده توسط V2: {{head.deployed_version_id if head and head.deployed_version_id else 'هیچ نسخه‌ای'}}.</p>
+<p><a href="{{url_for('manager.preflight',domain=domain,version=selected.id if selected else None)}}">
+<strong>بررسی آمادگی مهاجرت این دامنه (Preflight فقط‌خواندنی)</strong>
+</a> — اختلاف‌ها، گواهی‌ها و موانع قبل از جایگزینی سیستم قدیمی</p>
 <h2>Routeهای تعریف‌شده</h2>
 <p>ویرایش یا حذف Route فقط در دیتابیس ثبت می‌شود؛ پیش‌نویس و کانفیگ زنده تا فشردن «ساخت نسخه جدید» تغییر نمی‌کند.</p>
 {% for r in routes %}
@@ -237,6 +240,60 @@ def index():
             "SELECT * FROM operator_jobs ORDER BY id DESC LIMIT 100"
         ).fetchall()
     return render_template_string(PAGE, mode="index", domains=domains, jobs=jobs, q=q)
+
+
+@bp.get("/manage/<domain>/preflight")
+def preflight(domain):
+    """Read-only lab review. Does not execute Docker/nginx/ACME."""
+    from .preflight import review_revision
+    domain = hostname(domain)
+    requested = request.args.get("version", type=int)
+    try:
+        with open_db(db_path()) as conn:
+            ensure_schema(conn)
+            report = review_revision(conn, ssl_path(), domain, requested)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(url_for("manager.detail", domain=domain))
+    return render_template_string("""
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>پیش‌بررسی مهاجرت {{report.domain}}</title>
+<style>
+body{font:15px/1.9 system-ui,sans-serif;color:#1d2b45;background:#f4f6fb;margin:0}
+main{max-width:1000px;margin:22px auto;padding:12px}
+section{background:white;border:1px solid #dce4ee;border-radius:13px;padding:20px;margin-bottom:14px}
+h1{font-size:23px}h2{font-size:18px}
+a{color:#135b91}ul{padding-right:25px}
+li{padding:5px 0}.warn{background:#fff7e7;border-right:4px solid #dbb05c}
+.bad{background:#fff0f0;border-right:4px solid #ca4545}
+.ok{background:#e9f7ee;border-right:4px solid #49a16a}
+code{direction:ltr;unicode-bidi:isolate}
+</style></head><body><main>
+<section><a href="/manage/{{report.domain}}">بازگشت به دامنه</a> | <a href="/manage">فهرست دامنه‌ها</a> |
+<a href="/help/versions">راهنمای نسخه‌ها</a>
+<h1>بررسی آمادگی مهاجرت — <code>{{report.domain}}</code></h1>
+<p>Revision: <code>{{report.revision_id or 'بدون Draft'}}</code></p>
+<p><strong>این گزارش فقط از دیتابیس آزمایشی استفاده می‌کند.</strong> حتی اگر مانعی پیدا نشود، تا زمانی که
+نسخه زنده مجدداً گرفته نشود، nginx -t و تست واقعی انجام نشده و مالکیت دامنه تأیید نشده باشد،
+اجازه Deploy نیست. هیچ تغییری روی کانفیگ، گواهی یا Nginx ایجاد نمی‌شود.</p>
+</section>
+<section class="bad"><h2>موانع / نیازمند اصلاح یا تأیید انسانی ({{report.blockers|length}})</h2>
+{% if report.blockers %}<ul>{% for x in report.blockers %}<li>{{x}}</li>{% endfor %}</ul>
+{% else %}<p>در این بررسی اولیه مانع مشخصی مشاهده نشد؛ این به معنی آماده بودن انتشار نیست.</p>{% endif %}
+</section>
+<section class="warn"><h2>هشدارها ({{report.warnings|length}})</h2>
+<ul>{% for x in report.warnings %}<li>{{x}}</li>{% endfor %}</ul></section>
+<section class="ok"><h2>بررسی‌های گذرانده‌شده ({{report.checks|length}})</h2>
+<ul>{% for x in report.checks %}<li>{{x}}</li>{% endfor %}</ul></section>
+<section><h2>قدم اجرایی بعد از رفع موانع</h2>
+<p>برای استقرار واقعی هنوز یک ابزار اجرایی کوچک با حداقل دسترسی لازم است:
+نسخه ثابت و تأییدشده را روی فایل همان دامنه تست کند، از قبلی بکاپ بگیرد،
+با <code>nginx -t</code> صحت نحوی را بررسی کند، Reload کند و امکان بازگشت داشته باشد.
+این ابزار در این نسخه به پنل متصل نشده است.</p>
+</section>
+</main></body></html>
+""", report=report)
 
 
 @bp.get("/manage/<domain>")
