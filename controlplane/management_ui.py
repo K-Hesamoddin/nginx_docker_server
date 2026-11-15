@@ -182,16 +182,12 @@ Reason: {{tls_result.reason}}</p>
 <pre>{{diff if diff else 'تغییری برای نمایش وجود ندارد'}}</pre>
 <p><small>نسخه live_snapshot صرفاً بایگانی کانفیگ عملیاتی زمان برداشت است؛ به معنی Deploy شدن توسط V2 نیست.</small></p>
 </section>
-<section><h2>درخواست گواهی SSL</h2>
-<form method="post" action="{{url_for('manager.certificate_request',domain=domain)}}">
-<input type="hidden" name="csrf" value="{{csrf}}">
-<label>دامنه یا Zone <input dir="ltr" name="zone" value="{{domain}}" required></label>
-<label>نوع <select name="kind"><option value="dedicated">Dedicated (برای یک Host)</option>
-<option value="wildcard">Wildcard (برای دامنه اصلی و *.zone)</option></select></label>
-<button>ثبت درخواست SSL در صف</button>
-</form>
-<p><small>کلید NSIN و کلید خصوصی SSL در پنل وارد نمی‌شوند. درخواست فعلاً فقط در صف ثبت می‌شود؛
-صدور واقعی بعداً توسط Worker جداگانه و DNS-01 انجام خواهد شد.</small></p>
+<section><h2>گواهی مشترک SSL برای Zone</h2>
+<p>گواهی جدید برای هر Subdomain جدا صادر نمی‌کنیم؛ همه نام‌های یک‌سطحی از یک
+Wildcard مشترک همان Zone استفاده خواهند کرد (شامل Apex و *.zone).</p>
+<p><a href="/admin/ssl"><strong>رفتن به SSL یکپارچه: انتخاب Zone و DNS Provider و ثبت یک درخواست Wildcard</strong></a></p>
+<p><small>از این صفحه درخواست اختصاصی صادر نمی‌شود. گواهی‌های قدیمی هنگام مهاجرت حفظ می‌شوند.
+صدور واقعی DNS-01 هنوز به پنل متصل نیست؛ هیچ DNS یا Nginx تغییر نمی‌کند.</small></p>
 </section>
 {% endif %}
 </main></body></html>
@@ -409,8 +405,16 @@ def deploy_request(domain):
 
 @bp.post("/manage/<domain>/request-ssl")
 def certificate_request(domain):
+    """Legacy endpoint remains guarded but only accepts approved zone wildcard."""
     def action(conn, d):
-        _ = d
-        jid = queue_certificate(conn, request.form["zone"], request.form["kind"])
-        return f"درخواست گواهی در صف #{jid} ثبت شد؛ هنوز صادر نشده است."
+        from .admin_features import recommended_zones
+        zone = hostname(request.form["zone"])
+        if request.form.get("kind") != "wildcard":
+            raise ValueError("V2 فقط گواهی مشترک Wildcard قبول می‌کند.")
+        if not any(zone == item["zone"] and
+                   (d == zone or d.endswith("." + zone))
+                   for item in recommended_zones(conn)):
+            raise ValueError("برای انتخاب Zone صحیح وارد /admin/ssl شو.")
+        jid = queue_certificate(conn, zone, "wildcard")
+        return f"درخواست مشترک Zone در صف #{jid} ثبت شد؛ هنوز صادر نشده است."
     return _post_action(domain, action)
