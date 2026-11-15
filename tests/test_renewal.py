@@ -117,6 +117,36 @@ def test_no_trust_no_publish(renewal_env, monkeypatch):
     assert not list(ssl.glob("wildcard.*.crt"))
 
 
+def test_sync_accepts_older_cryptography_expiry_api(renewal_env, monkeypatch):
+    """System Python may lack Certificate.not_valid_after_utc."""
+    from controlplane import core
+    original = core.x509.load_pem_x509_certificate
+
+    class OldCertificate:
+        def __init__(self, certificate):
+            self.certificate = certificate
+
+        def __getattr__(self, attr):
+            if attr == "not_valid_after_utc":
+                raise AttributeError(attr)
+            return getattr(self.certificate, attr)
+
+    monkeypatch.setattr(core.x509, "load_pem_x509_certificate",
+                        lambda pem: OldCertificate(original(pem)))
+    conn, root, ssl, _ = renewal_env
+    stub = sync_renewed(conn, root, ssl, "example.com")
+    assert resolve_certificate(conn, ssl, "www.example.com").stub == stub
+
+
+def test_reload_command_keeps_lab_virtualenv_python(renewal_env):
+    conn, root, ssl, stage = renewal_env
+    interpreter = root / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    interpreter.write_text("#!/bin/sh\\n")
+    cmd = reload_command(root, root / "data" / "controlplane.sqlite3", ssl, "example.com")
+    assert f"{interpreter} -m controlplane.cli sync-renewed example.com" in cmd
+
+
 def test_reload_command_quotes_inputs(renewal_env):
     conn, root, ssl, stage = renewal_env
     cmd = reload_command(root, root / "data" / "controlplane.sqlite3", ssl, "example.com")
