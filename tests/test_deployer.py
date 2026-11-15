@@ -156,6 +156,21 @@ def test_failing_www_origin_rolls_back_and_logs_failure(ready, monkeypatch):
     assert "restored" in row["result"]
 
 
+
+def test_reviewed_upstream_change_is_reported_separately_from_hard_ssl_blockers(ready):
+    db, root, rid, job_id, target = ready
+    original = db.execute("SELECT body FROM config_versions WHERE id=?", (rid,)).fetchone()[0]
+    modified = original.replace("192.0.2.11:3000", "192.0.2.12:3000")
+    assert modified != original
+    new_revision = store_version(db, "example.com", modified, "manual", "approved backend move")
+    new_job = queue_deployment(db, "example.com", new_revision)
+    report = deployer.plan_job(db, root, new_job)
+    assert report["eligible_for_operator_review"]
+    assert report["blockers"] == []
+    assert any("تفاوت Route" in s for s in report["review_required"])
+    assert report["revision_sha256"] != _plan(ready)["revision_sha256"]
+
+
 def test_execute_legacy_manual_domain_needs_separate_approval(ready, monkeypatch):
     db, root, rid, job_id, target = ready
     db.execute("""INSERT INTO legacy_flags(domain,flag_count,first_flag,second_flag)
