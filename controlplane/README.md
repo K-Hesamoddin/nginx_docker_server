@@ -1,6 +1,47 @@
 # Nginx Control Plane V2 (feature preview)
 
 
+## DNS-provider-neutral SSL and simplified deployment plan
+
+**DNS routing is not the ACME issuer selection.** A record/CNAME targets and
+Cloudflare proxying are independent of who hosts the authoritative DNS zone.
+Never assume every hostname uses NSIN. The operator chooses one provider for
+each zone at `/admin/ssl`:
+
+- `Cloudflare`: planned API-based DNS-01 integration for zones managed there.
+- `NSIN`: optional legacy API-based DNS-01 integration for its authoritative zones.
+- `Other DNS / custom API`: integration will require a compatible plugin.
+- `Manual TXT`: possible DNS-01 choice when no API exists, but unattended
+  renewal is **not** available.
+- `Unconfigured`: do not start certificate issuance until DNS authority
+  is verified by the operator.
+
+Provider selection is saved in lab SQLite **without any DNS credentials**.
+It does not call an ACME client, update DNS, create certificates, or change
+Nginx. The existing CLI `issue-wildcard` is an **NSIN-only experimental
+prototype** and is **not** invoked by the web UI. It is not a generic
+issuer or a reason to standardize all zones on NSIN. Certificate selection
+at runtime must use a provider-specific ACME DNS-01 adapter; ordinary
+non-wildcard certs may use HTTP-01 if the HTTP challenge path is reachable.
+
+**Keep deployment simple:** one Nginx Docker container and one local, narrowly
+privileged execution helper (not a fleet of workers). For each explicitly
+approved domain revision, the helper should (1) back up the existing
+per-domain configuration, (2) stage and validate the new file with `nginx -t`
+in the real container context, (3) reload only Nginx on success and log
+the result, and (4) restore/reload the previous config if validation or
+health checking fails. No `docker compose down/up` or global re-generation.
+A separate certificate action asks the configured provider's ACME adapter
+for a cert, verifies it and records it before a reviewed per-domain config
+update. Special TCP/UDP stream port publication remains outside the
+simple HTTP-only deploy path and needs a separate explicit operation.
+
+**Not implemented yet:** the executor, the Cloudflare/custom DNS adapters,
+DNS credential storage, actual one-click issuance or deployment, external
+health checks and tested rollback. Legacy Nginx and renewal continue to own
+production until each domain is individually verified and migrated.
+Never execute the old NSIN CLI against a Cloudflare or other-provider zone.
+
 ## Persian in-panel operations guide and step-by-step tours
 
 The V2 lab panel has a self-contained, authenticated **فارسی راهنمای پنل**:
@@ -125,7 +166,7 @@ Current capabilities:
 - Local-only password-protected and CSRF-protected Flask admin UI for domains, routes, registered certificates and policy profile.
 - SQLite inventory with idempotent legacy domains.list import and export for compatibility.
 - Certificate resolver chooses a valid dedicated SAN first, then matching wildcard SAN. Drafts can show PENDING-SSL, but live render and queued deploy of those drafts are blocked.
-- DNS-01 wildcard issue via acme.sh dns_nsin plugin (NSIN API credentials in environment only). No self-signed production fallback.
+- Existing experimental NSIN-only CLI wildcard issuer (not connected to the web UI); per-zone Cloudflare/NSIN/other/manual selection is staging metadata only. No self-signed production fallback.
 - Explicit per-domain draft generation, manual editor, immutable revision history, diffs and queued deploy/SSL requests (web UI; queue is not executed yet).
 - Tests and GitHub Actions checks.
 
@@ -417,9 +458,9 @@ Connect with SSH forwarding, e.g. ssh -L 8787:127.0.0.1:8787 user@server
 Open http://127.0.0.1:8787 in your local browser.
 Do not publish admin UI under a public subdomain or NSIN proxy.
 
-## NSIN wildcard issuance (explicit operator step)
+## Legacy NSIN-only wildcard CLI prototype (not the default provider)
 
-NSIN must be authoritative for the zone; install acme.sh and its documented dns_nsin plugin.
+Only use this legacy prototype if NSIN is truly authoritative for the selected zone; otherwise do not run it. For Cloudflare or other providers, the corresponding ACME provider adapter must first be implemented and tested. Install acme.sh and dns_nsin only when testing an NSIN-managed zone.
 Set a scoped, non-read-only NSIN_Api_Key via a secure env mechanism; never commit or paste the API key.
 Then run **on staging only**, after installing acme.sh and its verified DNS plugin:
   python -m controlplane.cli issue-wildcard micmodshop.ir
