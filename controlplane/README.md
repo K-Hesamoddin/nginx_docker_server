@@ -1,6 +1,59 @@
 # Nginx Control Plane V2 (feature preview)
 
 
+## One-shot deploy runner prototype (operator-gated, NOT installed in production)
+
+The feature branch now contains `controlplane/deployer.py`. It is a local,
+explicit executor for an existing `operator_jobs(kind='deploy')` queue entry.
+It is never called by Flask, systemd, a timer, or a background worker.
+The old bulk `controlplane.cli apply` is still disabled.
+
+### Read-only plan (safe, no docker calls or writes)
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+source .venv/bin/activate
+python -m controlplane.deployer \
+  --db /home/cms/nginx-control-plane-v2-lab/data/migration-review.sqlite3 \
+  --production-root /home/cms/nginx_docker_server \
+  --job-id JOB_ID
+```
+
+The plan prints the domain, immutable revision SHA256, current live file
+SHA256, preflight blockers and warnings. It refuses absent/symlinked
+files and non-deploy jobs. `JOB_ID` must already be present in the panel
+queue; `micmodshop.ir` revision #30 cannot enter that queue while it
+contains `PENDING-SSL` placeholders, which is intentional.
+
+### Explicit operator execution (NOT approved for the real host yet)
+
+The executable path is test-driven with fake Docker; it must be
+separately audited on a staging clone with the actual Nginx image/mounts,
+not run as root from a user-writable lab checkout. A production-capable
+deployment identity and root-owned reviewed installation must be agreed
+and tested separately. **Do not use sudo on this lab checkout.**
+
+Execution requires the exact queued job, matching current-file SHA256,
+matching immutable revision SHA256, typed domain confirmation and
+acknowledged diff; a legacy flag 0 adds explicit ownership approval.
+No acknowledgement can bypass preflight blockers or incomplete SSL.
+The runner checks Nginx container bind mounts, validates running config,
+checks current origin TLS, makes a persistent 0600 backup, atomically
+changes only `conf/auto/<domain>.conf`, runs `nginx -t`, reloads only
+the existing Nginx process, and probes all candidate HTTPS server_names.
+If validation or health fails, it restores and reloads the previous
+file and marks the job failed. Success updates the queued job status
+and V2 deployed revision. An unsuccessful rollback is a critical
+manual-intervention event, and the original backup is preserved.
+
+**Limitations:** no production integration test, no privileged wrapper
+hardening, no automatic web job consumer, no live ACME wildcard issuance
+or renewal. This is an operator tool prototype, not a one-click panel
+deploy or authorization to change the 29 active legacy configs.
+New-domain deployment and Stream/Docker port changes are not supported.
+Availability checks are a local TLS handshake plus HEAD /; application
+endpoint-specific tests are still required before production approval.
+
 ## Per-domain preflight in the panel (read-only)
 
 Open `/manage/<domain>/preflight` from the domain's detail page to
@@ -85,9 +138,10 @@ for a cert, verifies it and records it before a reviewed per-domain config
 update. Special TCP/UDP stream port publication remains outside the
 simple HTTP-only deploy path and needs a separate explicit operation.
 
-**Not implemented yet:** the executor, the Cloudflare/custom DNS adapters,
-DNS credential storage, actual one-click issuance or deployment, external
-health checks and tested rollback. Legacy Nginx and renewal continue to own
+**Not connected to production:** the one-shot executor is test-only and disabled
+by default; Cloudflare/custom DNS adapters, DNS credential integration,
+actual panel-triggered issuance/deployment, hardened privileged installation
+and full production health checks/rollback testing are still outstanding. Legacy Nginx and renewal continue to own
 production until each domain is individually verified and migrated.
 Never execute the old NSIN CLI against a Cloudflare or other-provider zone.
 
