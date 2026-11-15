@@ -1,5 +1,43 @@
 # Nginx Control Plane V2 (feature preview)
 
+## Safe wildcard SSL staging (operator-approved, no reload)
+
+An issued wildcard is saved in V2 lab inventory, not automatically
+copied into the production Nginx bind mount. Use the generic
+`controlplane.cert_stage` operator command for one DNS zone and one immutable
+certificate generation. No ACME API key is required for this step.
+
+For the already issued micmodshop.ir wildcard, inspect the read-only plan:
+
+```bash
+cd /home/cms/nginx-control-plane-v2-lab
+source .venv/bin/activate
+python -m controlplane.cert_stage \
+  --db "$PWD/data/migration-review.sqlite3" \
+  --lab-ssl "$PWD/ssl" \
+  --production-root /home/cms/nginx_docker_server \
+  --zone micmodshop.ir \
+  --stub wildcard.micmodshop.ir.7be99665e00bdf3c6117
+```
+
+After independent approval to copy the SSL pair only, use the same command
+with `--execute --confirm-zone micmodshop.ir`. It validates the certificate
+chain, SAN coverage, key match, expiry, immutable content-derived filename,
+V2 inventory registration and destination paths; verifies Docker's actual bind
+mount; then publishes `.key` (0600) and `.crt` (0644) as new regular files,
+never replacing an existing path. Recoverable failures remove only new files
+created by this command. Re-running an identical pair is idempotent.
+
+This operation does not update Nginx config, reload/restart Nginx, activate
+the new certificate, run Certbot, or authorize a V2 revision deploy.
+A separately approved deployment must still pass Nginx checks, runtime
+probes and rollback requirements. All older certificates stay untouched.
+Production copying is deliberately not automatic on renewal: stage each
+new immutable generation explicitly. Requires unprivileged write permission
+to the destination. If permission is denied, use a separately audited,
+root-owned limited helper. Never run `sudo python` from the writable lab.
+
+
 
 ## One-shot deploy runner prototype (operator-gated, NOT installed in production)
 
