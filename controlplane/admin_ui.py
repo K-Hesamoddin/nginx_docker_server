@@ -112,12 +112,13 @@ PAGE = """
 <a href="{{url_for('settings.includes')}}">Includeها</a> مراجعه کن.</p></section>
 
 {% elif page == 'ssl' %}
-<h1>گواهی‌های یکپارچه پیشنهادی</h1>
+<h1>گواهی مشترک Wildcard به‌ازای هر DNS Zone</h1>
 <p class="muted">هر درخواست Wildcard شامل نام اصلی zone و *.zone در SAN است. Wildcard فقط یک سطح از زیردامنه‌ها را پوشش می‌دهد.
 این فهرست از نام‌های دیتابیس <strong>و server_name در کانفیگ‌های بایگانی‌شده</strong> پیشنهاد شده و به معنی تشخیص خودکار سرویس‌دهنده DNS، مالکیت Zone یا اعتبار گواهی‌های موجود نیست. نام فایل گواهی به معنی معتبر بودن آن نیست.</p>
-<div class="alert"><strong>روش ساده:</strong> برای هر Zone فقط سرویس‌دهنده DNS آن را انتخاب کن؛ Cloudflare، NSIN، DNS دیگر یا روش دستی.
-این انتخاب صرفاً در دیتابیس ثبت می‌شود؛ هیچ API Key، رکورد TXT یا درخواست ACME از این صفحه اجرا نمی‌شود.
-برای Wildcard، DNS-01 لازم است؛ تمدید خودکار در حالت دستی تضمین نمی‌شود.</div>
+<div class="alert"><strong>سیاست V2: یک گواهی مشترک برای هر Zone، نه برای هر Subdomain.</strong>
+برای هر Zone ابتدا DNS Provider معتبر آن را انتخاب کن؛ Cloudflare، NSIN، DNS دیگر یا روش دستی.
+درخواست هر کارت شامل هر دو SAN یعنی <code>zone</code> و <code>*.zone</code> است؛ هیچ API Key، رکورد TXT یا درخواست ACME از این صفحه اجرا نمی‌شود.
+صدور Wildcard از DNS-01 استفاده می‌کند. روش دستی برای تمدید بدون دخالت انسان مناسب نیست.</div>
 <div class="grid">
 {% for z in zones %}
 <section class="panel">
@@ -149,23 +150,22 @@ PAGE = """
 {% if z.not_covered %}
 <div class="alert"><strong>زیر دامنه خارج از پوشش این Wildcard:</strong>
 {% for d in z.not_covered %}<code>{{d}}</code>{% if not loop.last %}، {% endif %}{% endfor %}
-<p>برای این نام‌ها گواهی اختصاصی یا wildcard در سطح عمیق‌تر لازم است.</p></div>
+<p>برای این نام‌ها یک Wildcard دیگر در Zone عمیق‌تر (مثل <code>*.erp.example.com</code>) لازم است؛ صدور تک‌ساب‌دامنه‌ای سیاست V2 نیست.</p></div>
 {% endif %}
 <form method="post" action="{{url_for('settings.ssl_request')}}">
 <input type="hidden" name="csrf" value="{{csrf}}">
 <input type="hidden" name="zone" value="{{z.zone}}">
 <input type="hidden" name="kind" value="wildcard">
-<button>ثبت درخواست Wildcard</button></form>
-<small>فقط یک کار pending ثبت می‌شود؛ DNS/ACME در این مرحله اجرا نمی‌شود.</small>
+<button>ثبت درخواست گواهی مشترک Zone</button></form>
+<small>یک job به‌ازای Zone در حالت pending نگهداری می‌شود؛ کلیک تکراری آن را تکثیر نمی‌کند. DNS/ACME هنوز اجرا نمی‌شود.</small>
 </section>
 {% endfor %}
 </div>
-<section class="panel"><h2>گواهی اختصاصی برای یک نام</h2>
-<form method="post" action="{{url_for('settings.ssl_request')}}">
-<input type="hidden" name="csrf" value="{{csrf}}">
-<label>دامنه / Subdomain <input name="zone" dir="ltr" placeholder="test.erp.micromodern.ir" required></label>
-<input type="hidden" name="kind" value="dedicated">
-<button>ثبت درخواست اختصاصی</button></form></section>
+<section class="panel"><h2>تکلیف گواهی‌های قدیمی Subdomain چیست؟</h2>
+<p>گواهی‌های اختصاصی قبلی فعلاً برای جلوگیری از اختلال در Nginx عملیاتی حفظ می‌شوند؛
+پس از صدور و اعتبارسنجی گواهی مشترک Zone، هر دامنه در نسخه تأییدشده جدید به همان گواهی مشترک ارجاع می‌دهد.
+فقط پس از مهاجرت و تست می‌توان تمدیدهای قدیمی تک‌ساب‌دامنه‌ای را کنار گذاشت.
+در این پنل درخواست جدید برای گواهی تک‌ساب‌دامنه‌ای پذیرفته نمی‌شود.</p></section>
 
 {% elif page == 'users' %}
 <h1>کاربران و نقش‌ها</h1>
