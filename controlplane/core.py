@@ -324,9 +324,10 @@ def resolve_certificate(conn: sqlite3.Connection, ssl_dir: str | Path,
         except (OSError, ValueError, x509.ExtensionNotFound):
             continue
         if any(matches(pattern, name) for pattern in info.names):
-            # Dedicated cert wins when valid. For multiple wildcard generations
-            # pick the freshest cert, not lexicographically smallest fingerprint.
-            priority = 0 if row["kind"] == "dedicated" else 1
+            # V2 converges hostnames on the shared wildcard for their zone.
+            # Valid legacy dedicated certs remain a fallback until migrated.
+            # Among wildcard generations prefer the freshest valid certificate.
+            priority = 0 if row["kind"] == "wildcard" else 1
             candidates.append((priority, -info.expires.timestamp(), info.stub, info))
     if not candidates:
         raise ValueError(f"No valid certificate (including wildcard) for {name}")
