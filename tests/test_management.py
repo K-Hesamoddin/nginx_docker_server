@@ -98,8 +98,15 @@ def test_jobs_are_durable_requests_not_executions(db, tmp_path):
         "SELECT deployed_version_id FROM config_heads WHERE domain='micmodshop.ir'"
     ).fetchone()[0] is None
     wildcard_job = queue_certificate(db, "micmodshop.ir", "wildcard")
-    dedicated_job = queue_certificate(db, "www.micmodshop.ir", "dedicated")
-    assert wildcard_job != dedicated_job
+    # Only one shared wildcard request per zone, even with repeated clicks.
+    assert queue_certificate(db, "micmodshop.ir", "wildcard") == wildcard_job
+    assert db.execute(
+        "SELECT COUNT(*) FROM operator_jobs WHERE kind='issue-wildcard'"
+    ).fetchone()[0] == 1
+    with pytest.raises(ValueError, match="اختصاصی"):
+        queue_certificate(db, "www.micmodshop.ir", "dedicated")
+    with pytest.raises(ValueError, match="Zone"):
+        queue_certificate(db, "www.micmodshop.ir", "wildcard")
     with pytest.raises(ValueError, match="Zone"):
         queue_certificate(db, "other.example.com", "wildcard")
 
