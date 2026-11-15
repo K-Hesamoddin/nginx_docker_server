@@ -36,6 +36,14 @@ def ensure_features(conn: sqlite3.Connection, bootstrap_hash: str | None = None)
         CREATE TABLE IF NOT EXISTS panel_allowed_nets (
             network TEXT PRIMARY KEY
         );
+        -- The provider label is planning metadata only. No API token or
+        -- credential is stored or used by the unprivileged web application.
+        CREATE TABLE IF NOT EXISTS dns_zone_settings (
+            zone TEXT PRIMARY KEY,
+            provider TEXT NOT NULL DEFAULT 'unconfigured'
+              CHECK(provider IN ('unconfigured','cloudflare','nsin','other','manual')),
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS domain_includes (
             domain TEXT NOT NULL REFERENCES domains(name) ON DELETE CASCADE,
             filename TEXT NOT NULL,
@@ -262,6 +270,37 @@ def archived_certificate_paths(conn: sqlite3.Connection) -> dict[str, list[str]]
         ))
         found.setdefault(row["domain"], set()).update(refs)
     return {domain: sorted(paths) for domain, paths in found.items()}
+
+
+DNS_PROVIDERS = frozenset(("unconfigured", "cloudflare", "nsin", "other", "manual"))
+
+
+def get_zone_provider(conn: sqlite3.Connection, zone: str) -> str:
+    """Read operator-selected DNS authority. Not auto-detected from A/NS records."""
+    zone = hostname(zone)
+    row = conn.execute(
+        "SELECT provider FROM dns_zone_settings WHERE zone=?", (zone,)
+    ).fetchone()
+    return row["provider"] if row else "unconfigured"
+
+
+def set_zone_provider(conn: sqlite3.Connection, zone: str, provider: str) -> None:
+    """Set per-zone DNS metadata; never create TXT records or call ACME."""
+    zone = hostname(zone)
+    if provider not in DNS_PROVIDERS:
+        raise ValueError("Unsupported DNS provider")
+    names = known_inventory_hosts(conn)
+    if not (zone in names or any(d.endswith("." + zone) for d in names)):
+        raise ValueError("DNS zone is unrelated to registered or archived hostnames")
+    with conn:
+        conn.execute(
+            """INSERT INTO dns_zone_settings(zone,provider,updated_at)
+               VALUES(?,?,CURRENT_TIMESTAMP)
+               ON CONFLICT(zone) DO UPDATE SET
+               provider=excluded.provider, updated_at=CURRENT_TIMESTAMP""",
+            (zone, provider)
+        )
+        audit(conn, "dns-provider-staged", f"zone:{zone} provider:{provider}")
 
 
 def recommended_zones(conn: sqlite3.Connection) -> list[dict]:
