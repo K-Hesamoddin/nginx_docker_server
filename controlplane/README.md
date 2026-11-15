@@ -76,7 +76,10 @@ matching immutable revision SHA256, typed domain confirmation and
 acknowledged diff; a legacy flag 0 adds explicit ownership approval.
 No acknowledgement can bypass preflight blockers or incomplete SSL.
 The runner checks Nginx container bind mounts, validates running config,
-checks current origin TLS, makes a persistent 0600 backup, atomically
+checks current origin TLS, makes a persistent 0600 backup under the
+**existing V2 database directory** (`/home/cms/nginx-control-plane-v2-lab/data/v2-deploy-backups/`),
+and holds its operator lock there. It neither requires nor creates a
+`data/` directory inside the V1 production Nginx checkout. It atomically
 changes only `conf/auto/<domain>.conf`, runs `nginx -t`, reloads only
 the existing Nginx process, and probes all candidate HTTPS server_names.
 If validation or health fails, it restores and reloads the previous
