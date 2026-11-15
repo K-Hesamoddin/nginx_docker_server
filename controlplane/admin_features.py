@@ -284,7 +284,7 @@ def get_zone_provider(conn: sqlite3.Connection, zone: str) -> str:
     return row["provider"] if row else "unconfigured"
 
 
-def set_zone_provider(conn: sqlite3.Connection, zone: str, provider: str) -> None:
+def set_dns_zone_provider(conn: sqlite3.Connection, zone: str, provider: str) -> None:
     """Set per-zone DNS metadata; never create TXT records or call ACME."""
     zone = hostname(zone)
     if provider not in DNS_PROVIDERS:
