@@ -80,7 +80,15 @@ PAGE = """
 <a href="{{url_for('settings.access')}}" class="{{'active' if page=='access' else ''}}">IPهای مجاز</a>
 {% endif %}
 <a href="/">پنل اولیه</a>
+<a href="/help">راهنمای کامل</a>
 </nav>
+<section class="panel" style="padding:12px 18px">
+<strong>راهنمای همین صفحه:</strong>
+<a href="{{url_for('help.guide',section=guide_section)}}">آموزش کامل</a>
+<span class="muted"> | </span>
+<a href="{{url_for('help.tour',section=guide_section,step=1)}}">شروع تور مرحله‌به‌مرحله</a>
+<span class="muted"> | فقط آموزشی، بدون تغییر تنظیمات</span>
+</section>
 {% for category,msg in get_flashed_messages(with_categories=true) %}
 <div class="{{'alert' if category=='error' else 'ok'}}">{{msg}}</div>{% endfor %}
 <div class="alert">تمام ویرایش‌ها صرفاً در دیتابیس آزمایشی ذخیره می‌شوند. اجرای واقعی SSL، انتشار کانفیگ،
@@ -297,7 +305,13 @@ def _connect():
 
 
 def _render(page, **kwargs):
-    return render_template_string(PAGE, page=page, csrf=session["csrf"], **kwargs)
+    guide_section = {
+        "dashboard": "overview", "ssl": "ssl",
+        "users": "users", "access": "access",
+        "includes": "security", "streams": "streams"
+    }.get(page, "overview")
+    return render_template_string(PAGE, page=page, csrf=session["csrf"],
+                                  guide_section=guide_section, **kwargs)
 
 
 def _try(action, redirect_to):
