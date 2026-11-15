@@ -1,0 +1,23 @@
+name: Control Plane V2 Tests
+on:
+  pull_request:
+    paths:
+      - 'controlplane/**'
+      - 'requirements-controlplane.txt'
+      - 'tests/**'
+      - '.github/workflows/controlplane-tests.yml'
+  push:
+    branches: ['feature/nginx-control-plane-v2']
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-controlplane.txt
+      - run: python -m compileall -q controlplane
+      - run: python -m pytest -q tests/

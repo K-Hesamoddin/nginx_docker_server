@@ -41,3 +41,11 @@ ssl/*.cnf
 # Temporary config files
 conf/*.tmp
 conf/*.temp
+
+# Control Plane V2 runtime; never commit mounted SSL data, ACME keys or DB
+/ssl/
+/data/
+/.venv/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
