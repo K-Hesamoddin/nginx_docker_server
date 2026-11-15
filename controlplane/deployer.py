@@ -147,7 +147,15 @@ def plan_job(conn: sqlite3.Connection, root: Path, job_id: int) -> dict:
     body = record["body"]
     current = target.read_bytes()
     report = review_revision(conn, root / "ssl", domain, record["id"])
-    blockers = list(report["blockers"])
+    # Route/upstream changes are a legitimate purpose of a deploy. Preflight
+    # classifies them as requiring human review; the CLI requires a separate
+    # reviewed-diff acknowledgement AND the exact current-file SHA256.
+    # Missing/invalid SSL, unknown syntax and missing snapshots are never bypassed.
+    review_required = [
+        item for item in report["blockers"]
+        if item.startswith("تفاوت Route ") or item.startswith("Includeهای جدید")
+    ]
+    blockers = [item for item in report["blockers"] if item not in review_required]
     if job["status"] != "pending":
         blockers.append("Deployment job must be pending")
     if digest(body.encode("utf-8")) != record["sha256"]:
@@ -169,6 +177,7 @@ def plan_job(conn: sqlite3.Connection, root: Path, job_id: int) -> dict:
         "current_sha256": digest(current), "revision_sha256": record["sha256"],
         "live_file": str(target), "legacy_manual": legacy,
         "blockers": list(dict.fromkeys(blockers)),
+        "review_required": review_required,
         "warnings": report["warnings"],
         "eligible_for_operator_review": not blockers,
         "scope": "No Docker calls or writes in plan. Approval does not bypass TLS/route blockers.",
