@@ -171,7 +171,7 @@ def create_app():
             abort(403)
         # Issuance and deployment approvals require administrator privileges.
         if request.method == "POST" and (
-            request.path == "/admin/ssl/request" or
+            request.path in ("/admin/ssl/request", "/admin/ssl/provider") or
             (request.path.startswith("/manage/") and
              request.path.endswith(("/request-deploy", "/request-ssl")))
         ) and user["role"] != "admin":
