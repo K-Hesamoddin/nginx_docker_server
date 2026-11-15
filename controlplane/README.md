@@ -25,6 +25,31 @@ against the real container, back up only its managed path, perform
 `nginx -t`, reload and roll back upon failure after operator approval.
 Never run the legacy bulk `apply` or overwrite unmanaged V1 config files.
 
+## SSL issuance policy: one shared wildcard per DNS zone
+
+**The new V2 panel must never issue certificates subdomain-by-subdomain.**
+For each DNS Zone, request one certificate containing BOTH SANs:
+`example.com` and `*.example.com`. All directly nested HTTP hosts,
+including `www.example.com`, may share this validated cert after review.
+Deep hosts (`test.erp.example.com`) require an additional wildcard group:
+`erp.example.com` + `*.erp.example.com`; one-level wildcard does NOT
+cover multiple labels. Separate registered domains need separate groups.
+
+- `/admin/ssl` is the central UI that queues one `issue-wildcard` job per
+  Zone, deduplicated while it remains pending or running.
+- V2 now refuses new `issue-dedicated` requests and wildcard requests
+  for accidental per-host zones such as `www.example.com`.
+- Existing dedicated certificates and old Certbot renewal entries
+  remain untouched until each domain is migrated and verified.
+- Wildcards require DNS-01 at the actual authoritative DNS provider
+  for the Zone, whether Cloudflare, NSIN, or another DNS service.
+  An API-enabled provider is needed for unattended renewal.
+- Issuance and deployment are still NOT wired to the production worker.
+  Queuing a wildcard is not a fix for an expired certificate.
+- Only after issuing and validating a shared cert, reviewing each
+  domain config, running real `nginx -t`, backup and controlled apply,
+  can obsolete per-subdomain issuance/renewal be safely retired.
+
 ## DNS-provider-neutral SSL and simplified deployment plan
 
 **DNS routing is not the ACME issuer selection.** A record/CNAME targets and
@@ -46,7 +71,7 @@ Nginx. The existing CLI `issue-wildcard` is an **NSIN-only experimental
 prototype** and is **not** invoked by the web UI. It is not a generic
 issuer or a reason to standardize all zones on NSIN. Certificate selection
 at runtime must use a provider-specific ACME DNS-01 adapter; ordinary
-non-wildcard certs may use HTTP-01 if the HTTP challenge path is reachable.
+existing dedicated certificates remain historical inventory; new per-subdomain issuance is disabled in V2.
 
 **Keep deployment simple:** one Nginx Docker container and one local, narrowly
 privileged execution helper (not a fleet of workers). For each explicitly
@@ -74,7 +99,7 @@ The V2 lab panel has a self-contained, authenticated **فارسی راهنمای
 - \`/help/overview\` — login and safe workflow.
 - \`/help/domains\` and \`/help/routes\` — domain creation, upstream/URI behavior, legacy migration exceptions.
 - \`/help/versions\` — immutable revisions, snapshots, Generate, manual editing, diffs and queued rollback.
-- \`/help/ssl\` — dedicated/wildcard coverage, SAN, pending DNS-01 requests and certificate status limitations.
+- \`/help/ssl\` — shared wildcard per-zone coverage, SAN, pending DNS-01 requests and certificate status limitations.
 - \`/help/security\` — per-domain security headers, Include catalog and versioned snippet drafts.
 - \`/help/streams\` — staged TCP/UDP listener, protocol, backend and stream context constraints.
 - \`/help/users\` — Viewer/Editor/Admin roles, second accounts and revocation.
