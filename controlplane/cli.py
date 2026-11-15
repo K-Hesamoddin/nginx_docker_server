@@ -113,8 +113,9 @@ def issue_wildcard(conn, root, db_file, ssl_dir, zone, acme_bin):
     else:
         print(f"Valid wildcard already registered for {zone}; no new issuance requested.")
     configure_renewal_hook(root, db_file, ssl_dir, zone, acme_bin)
-    print("ACME renewal hook configured. Live Nginx is unchanged unless the explicit")
-    print("root-owned data/enable-auto-deploy marker is enabled and all configs are V2-managed.")
+    print("NSIN-only experimental CLI: certificate renewal hook configured.")
+    print("Renewal registers a validated certificate candidate; it NEVER deploys or reloads Nginx.")
+    print("The web SSL provider selector is staging metadata; it does not invoke this CLI.")
 
 
 def main(argv=None):
