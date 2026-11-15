@@ -42,7 +42,11 @@ def reload_command(root: Path, db_file: Path, ssl_dir: Path, zone: str) -> str:
     env = (f"CONTROLPLANE_ROOT={shlex.quote(str(root))} "
            f"CONTROLPLANE_DB={shlex.quote(str(db_file))} "
            f"SSL_DIR={shlex.quote(str(ssl_dir))}")
-    python = shlex.quote(str(Path(sys.executable).resolve()))
+    # Do not resolve() the venv's python symlink: that strips its virtualenv
+    # identity and silently runs /usr/bin/python during acme.sh renewal.
+    venv_python = root / ".venv" / "bin" / "python"
+    python_path = venv_python if venv_python.is_file() else Path(sys.executable).absolute()
+    python = shlex.quote(str(python_path))
     return (f"cd {shlex.quote(str(root))} && {env} {python} "
             f"-m controlplane.cli sync-renewed {shlex.quote(zone)}")
 
