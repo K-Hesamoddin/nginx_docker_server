@@ -267,3 +267,42 @@ def test_archived_ssl_certificate_paths_visible_but_not_treated_as_verified(db):
     assert all(not p.endswith(".key") for paths in refs.values() for p in paths)
     zone = next(z for z in recommended_zones(db) if z["zone"] == "micromodern.ir")
     assert refs["cloud.micromodern.ir"][0] in zone["archived_cert_paths"]
+
+
+def test_dns_provider_is_per_zone_admin_only_and_never_issues_cert(db, login):
+    from controlplane.admin_features import get_zone_provider, set_dns_zone_provider
+    client, csrf = login
+    assert get_zone_provider(db, "micromodern.ir") == "unconfigured"
+    assert client.post("/admin/ssl/provider",
+                       data={"zone": "micromodern.ir", "provider": "cloudflare"}
+                       ).status_code == 403
+    response = client.post("/admin/ssl/provider", data={
+        "csrf": csrf, "zone": "micromodern.ir", "provider": "cloudflare"
+    })
+    assert response.status_code == 302
+    assert get_zone_provider(db, "micromodern.ir") == "cloudflare"
+    assert get_zone_provider(db, "micmodshop.ir") == "unconfigured"
+    assert b"Cloudflare" in client.get("/admin/ssl").data
+    assert db.execute("SELECT count(*) FROM operator_jobs").fetchone()[0] == 0
+
+    set_dns_zone_provider(db, "erp.micromodern.ir", "other")
+    assert get_zone_provider(db, "erp.micromodern.ir") == "other"
+    set_dns_zone_provider(db, "micromodern.ir", "manual")
+    assert get_zone_provider(db, "micromodern.ir") == "manual"
+
+    with pytest.raises(ValueError, match="Unsupported DNS provider"):
+        set_dns_zone_provider(db, "micromodern.ir", "untrusted-provider")
+    with pytest.raises(ValueError, match="unrelated"):
+        set_dns_zone_provider(db, "unregistered.example.net", "nsin")
+
+    user_upsert(db, 1, "editor4", "another-strong-password", "editor")
+    editor = create_app().test_client()
+    assert editor.post("/login", data={
+        "username": "editor4", "password": "another-strong-password"
+    }).status_code == 302
+    with editor.session_transaction() as sess:
+        token = sess["csrf"]
+    assert editor.post("/admin/ssl/provider", data={
+        "csrf": token, "zone": "micromodern.ir", "provider": "nsin"
+    }).status_code == 403
+    assert get_zone_provider(db, "micromodern.ir") == "manual"
