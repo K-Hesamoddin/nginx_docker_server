@@ -1,6 +1,30 @@
 # Nginx Control Plane V2 (feature preview)
 
 
+## Per-domain preflight in the panel (read-only)
+
+Open `/manage/<domain>/preflight` from the domain's detail page to
+review an immutable V2 revision **before planning migration**. It checks:
+
+- The selected revision and its SHA256 integrity; legacy snapshots are never deployable.
+- Missing or placeholder `PENDING-SSL` certificates and incomplete
+  `ssl_certificate` / `ssl_certificate_key` file-name pairs.
+- Certificate trust, SAN and expiry **when the referenced file pair is
+  available in the V2 lab SSL directory** (not a test of the live Docker cert).
+- Historic `live_snapshot` presence, simple location/proxy_pass drift,
+  include-set differences and explicit manual-legacy-flag warnings.
+- Never claims to prove nginx syntax, current production configuration,
+  origin reachability, DNS authority, or actual deployment safety.
+
+The report has blockers, warnings and passed checks. It does not write to
+SQLite, generate new revisions, call Docker or issue SSL. Even zero blockers
+is NOT an authorization to touch the active proxy. No executor is connected.
+The next implementation milestone is a small, narrowly privileged one-shot
+helper, initially disabled, that can validate a single selected domain
+against the real container, back up only its managed path, perform
+`nginx -t`, reload and roll back upon failure after operator approval.
+Never run the legacy bulk `apply` or overwrite unmanaged V1 config files.
+
 ## DNS-provider-neutral SSL and simplified deployment plan
 
 **DNS routing is not the ACME issuer selection.** A record/CNAME targets and
