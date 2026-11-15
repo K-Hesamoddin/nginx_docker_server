@@ -282,8 +282,16 @@ def execute_job(conn: sqlite3.Connection, root: Path, job_id: int, *,
             changed = True
             _docker("exec", "nginx-proxy", "nginx", "-t")
             _docker("exec", "nginx-proxy", "nginx", "-s", "reload")
-            _probe(plan["domain"])
+            # Check each HTTPS name, including www. An expired old www cert
+            # must not be silently accepted after switching to a wildcard.
+            tested_hosts = set()
+            for ssl_names, _, _ in _ssl_server_blocks(version["body"]):
+                for host in ssl_names.split():
+                    if host not in tested_hosts:
+                        _probe(host)
+                        tested_hosts.add(host)
             with conn:
+                from .core import audit
                 result = conn.execute(
                     """UPDATE operator_jobs SET status='succeeded',
                        started_at=COALESCE(started_at,CURRENT_TIMESTAMP),
@@ -302,6 +310,8 @@ def execute_job(conn: sqlite3.Connection, root: Path, job_id: int, *,
                        deployed_version_id=excluded.deployed_version_id""",
                     (plan["domain"], plan["revision"])
                 )
+                audit(conn, "deploy-succeeded",
+                      f"job {job_id}, {plan['domain']}, revision {plan['revision']}")
             return {"status": "succeeded", "job": job_id,
                     "domain": plan["domain"], "backup": str(backup)}
         except Exception:
@@ -314,7 +324,20 @@ def execute_job(conn: sqlite3.Connection, root: Path, job_id: int, *,
                     raise RuntimeError(
                         "CRITICAL: rollback failed. Backup preserved at " + str(backup)
                     ) from rollback_exc
-            # Preserve the original backup for operator forensic review.
+            # A failed attempt must not remain misleadingly pending.
+            with conn:
+                from .core import audit
+                conn.execute(
+                    """UPDATE operator_jobs
+                       SET status='failed', started_at=COALESCE(started_at,CURRENT_TIMESTAMP),
+                           finished_at=CURRENT_TIMESTAMP, result=?
+                       WHERE id=? AND kind='deploy' AND status='pending'""",
+                    ("Deployment failed; prior config restored; backup " + str(backup),
+                     job_id)
+                )
+                audit(conn, "deploy-failed-rolled-back",
+                      f"job {job_id}, {plan['domain']}")
+            # Preserve backup for forensic review and explicit future rollback.
             raise
 
 
