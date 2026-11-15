@@ -64,8 +64,8 @@ def test_plan_checks_shared_wildcard_and_does_not_touch_live_or_docker(ready, mo
     assert report["current_sha256"] == hashlib.sha256(original).hexdigest()
     assert target.read_bytes() == original
     assert db.execute("SELECT status FROM operator_jobs WHERE id=?", (job_id,)).fetchone()[0] == "pending"
-    assert not (db.execute("PRAGMA database_list").fetchone()[2] and
-                deployer.Path(db.execute("PRAGMA database_list").fetchone()[2]).parent.joinpath("v2-deploy-backups").exists())
+    state_dir = deployer.Path(db.execute("PRAGMA database_list").fetchone()[2]).parent
+    assert not (state_dir / "v2-deploy-backups").exists()
 
 
 def test_plan_blocks_pending_ssl_and_wrong_cert_or_unsafe_target(ready):
