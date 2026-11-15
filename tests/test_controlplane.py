@@ -55,21 +55,25 @@ def test_wildcard_one_level():
     assert not matches("*.example.com", "example.com")
     assert not matches("*.example.com", "a.b.example.com")
 
-def test_dedicated_precedence_then_expired_falls_back(tmp_path, monkeypatch):
+def test_wildcard_preferred_over_dedicated_with_legacy_fallback(tmp_path, monkeypatch):
     db = open_db(tmp_path / "v2.sqlite")
     make_cert(tmp_path, "wildcard", ["example.com", "*.example.com"])
     make_cert(tmp_path, "dedicated", ["www.example.com"])
     monkeypatch.setenv("CONTROLPLANE_CA_BUNDLE", str(tmp_path / "test-ca-bundle.pem"))
     save_certificate(db, "example.com", "wildcard", "wildcard")
     save_certificate(db, "www.example.com", "dedicated", "dedicated")
-    assert resolve_certificate(db, tmp_path, "www.example.com").stub == "dedicated"
-    make_cert(tmp_path, "dedicated", ["www.example.com"], expired=True)
     assert resolve_certificate(db, tmp_path, "www.example.com").stub == "wildcard"
+    assert resolve_certificate(db, tmp_path, "example.com").stub == "wildcard"
+    # Old dedicated files can still be a fallback if wildcard expires;
+    # no new per-subdomain issuance is allowed by the panel.
+    make_cert(tmp_path, "wildcard", ["example.com", "*.example.com"], expired=True)
+    assert resolve_certificate(db, tmp_path, "www.example.com").stub == "dedicated"
+    make_cert(tmp_path, "wildcard", ["example.com", "*.example.com"])
     save_domain(db, "example.com", redirect_www=True)
     save_route(db, "example.com", "/", "192.168.1.178:3000")
     conf = render_config(db, tmp_path, "example.com")
     assert "server_name www.example.com;" in conf
-    assert "ssl_certificate /etc/nginx/ssl/wildcard.crt;" in conf
+    assert conf.count("ssl_certificate /etc/nginx/ssl/wildcard.crt;") == 2
 
 def test_missing_cert_blocks_render(tmp_path):
     db = open_db(tmp_path / "v2.sqlite")
